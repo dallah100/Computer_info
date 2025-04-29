@@ -16,14 +16,8 @@ try {
     $username = $env:USERNAME
 
     $diskDrives = Get-CimInstance Win32_DiskDrive
-
-    $ip = (Get-NetIPAddress -AddressFamily IPv4 |
-        Where-Object { $_.IPAddress -notmatch '^169\.254|^127\.' -and $_.InterfaceAlias -notmatch "Loopback" -and $_.IPAddress }) |
-        Select-Object -First 1 -ExpandProperty IPAddress
-
-    $mac = (Get-NetAdapter |
-        Where-Object { $_.Status -eq "Up" }) |
-        Select-Object -First 1 -ExpandProperty MacAddress
+    $netAdapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" }
+    $netIPs = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch '^169\.254|^127\.' }
 
     $results = @()
     $first = $true
@@ -44,8 +38,9 @@ try {
             OSVersion      = if ($first) { $os.Version } else { "-" }
             CPU            = if ($first) { $cpu.Name } else { "-" }
             RAM_GB         = if ($first) { $ram } else { "-" }
-            IP_Address     = if ($first) { $ip } else { "-" }
-            MAC_Address    = if ($first) { $mac } else { "-" }
+            Network_Name   = "-"
+            MAC_Address    = "-"
+            IP_Address     = "-"
             Disk_Model     = $model
             Disk_Type      = $type
             Disk_Size_GB   = $sizeGB
@@ -56,6 +51,55 @@ try {
         }
 
         $first = $false
+    }
+
+    foreach ($adapter in $netAdapters) {
+        $adapterName = $adapter.Name
+        $macAddress = $adapter.MacAddress
+
+        $ips = $netIPs | Where-Object { $_.InterfaceAlias -eq $adapterName }
+        if ($ips.Count -eq 0) {
+            $results += [PSCustomObject]@{
+                ComputerName   = "-"
+                Username       = "-"
+                OS             = "-"
+                OSVersion      = "-"
+                CPU            = "-"
+                RAM_GB         = "-"
+                Network_Name   = $adapterName
+                MAC_Address    = $macAddress
+                IP_Address     = "N/A"
+                Disk_Model     = "-"
+                Disk_Type      = "-"
+                Disk_Size_GB   = "-"
+                Disk_Serial    = "-"
+                Serial_Number  = "-"
+                Manufacturer   = "-"
+                Model          = "-"
+            }
+        }
+        else {
+            foreach ($ipObj in $ips) {
+                $results += [PSCustomObject]@{
+                    ComputerName   = "-"
+                    Username       = "-"
+                    OS             = "-"
+                    OSVersion      = "-"
+                    CPU            = "-"
+                    RAM_GB         = "-"
+                    Network_Name   = $adapterName
+                    MAC_Address    = $macAddress
+                    IP_Address     = $ipObj.IPAddress
+                    Disk_Model     = "-"
+                    Disk_Type      = "-"
+                    Disk_Size_GB   = "-"
+                    Disk_Serial    = "-"
+                    Serial_Number  = "-"
+                    Manufacturer   = "-"
+                    Model          = "-"
+                }
+            }
+        }
     }
 
     $results | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
