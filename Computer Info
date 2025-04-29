@@ -1,9 +1,4 @@
-$computerName = $env:COMPUTERNAME
-$dateStamp = Get-Date -Format "yyyy-MM-dd"
-$outputFile = "C:\${computerName}_$dateStamp.csv"
-
 if (Test-Path $outputFile) {
-    Write-Host "⚠️ الملف موجود بالفعل، سيتم استبداله: $outputFile" -ForegroundColor Yellow
     Remove-Item $outputFile -Force
 }
 
@@ -16,12 +11,14 @@ try {
     $username = $env:USERNAME
 
     $diskDrives = Get-CimInstance Win32_DiskDrive
-    $netAdapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" }
+    # تعديل لجلب جميع كروت الشبكة، حتى الغير مفعلة
+    $netAdapters = Get-NetAdapter
     $netIPs = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch '^169\.254|^127\.' }
 
     $results = @()
     $first = $true
 
+    # استخراج معلومات الأقراص
     foreach ($disk in $diskDrives) {
         $model = $disk.Model
         $sizeGB = [math]::Round($disk.Size / 1GB, 2)
@@ -53,6 +50,7 @@ try {
         $first = $false
     }
 
+    # استخراج معلومات الشبكة
     foreach ($adapter in $netAdapters) {
         $adapterName = $adapter.Name
         $macAddress = $adapter.MacAddress
@@ -77,8 +75,7 @@ try {
                 Manufacturer   = "-"
                 Model          = "-"
             }
-        }
-        else {
+        } else {
             foreach ($ipObj in $ips) {
                 $results += [PSCustomObject]@{
                     ComputerName   = "-"
@@ -102,10 +99,12 @@ try {
         }
     }
 
+    # تصدير البيانات إلى ملف CSV
     $results | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
     Write-Host "`n✅ تم حفظ تقرير الجهاز في: $outputFile" -ForegroundColor Green
-    $results | Format-Table
+
+    Write-Host "📧 تم إرسال التقرير إلى: $to" -ForegroundColor Cyan
 }
 catch {
-    Write-Warning "❌ حصل خطأ أثناء جمع البيانات: $_"
+    Write-Warning "❌ حصل خطأ أثناء تنفيذ السكربت: $_"
 }
