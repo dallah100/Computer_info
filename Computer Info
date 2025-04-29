@@ -1,0 +1,54 @@
+$outputFile = "C:\LocalComputerInfo.csv"
+
+if (Test-Path $outputFile) {
+    Write-Host "⚠️ الملف موجود بالفعل، سيتم استبداله: $outputFile" -ForegroundColor Yellow
+    Remove-Item $outputFile -Force
+}
+
+try {
+    $os  = Get-CimInstance Win32_OperatingSystem
+    $cpu = Get-CimInstance Win32_Processor
+    $ram = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2)
+    $bios = Get-CimInstance Win32_BIOS
+    $cs = Get-CimInstance Win32_ComputerSystem
+    $computerName = $env:COMPUTERNAME
+
+    $diskDrives = Get-CimInstance Win32_DiskDrive
+
+    $results = @()
+    $first = $true
+
+    foreach ($disk in $diskDrives) {
+        $model = $disk.Model
+        $sizeGB = [math]::Round($disk.Size / 1GB, 2)
+        $type = if ($model -match "SSD") { "SSD" }
+                elseif ($model -match "NVMe" -or $model -match "M.2") { "NVMe/M.2" }
+                else { "HDD" }
+
+        $serial = ($disk | Get-CimAssociatedInstance -ResultClassName Win32_PhysicalMedia).SerialNumber
+
+        $results += [PSCustomObject]@{
+            ComputerName   = if ($first) { $computerName } else { "-" }
+            OS             = if ($first) { $os.Caption } else { "-" }
+            OSVersion      = if ($first) { $os.Version } else { "-" }
+            CPU            = if ($first) { $cpu.Name } else { "-" }
+            RAM_GB         = if ($first) { $ram } else { "-" }
+            Disk_Model     = $model
+            Disk_Type      = $type
+            Disk_Size_GB   = $sizeGB
+            Disk_Serial    = $serial
+            Serial_Number  = if ($first) { $bios.SerialNumber } else { "-" }
+            Manufacturer   = if ($first) { $cs.Manufacturer } else { "-" }
+            Model          = if ($first) { $cs.Model } else { "-" }
+        }
+
+        $first = $false
+    }
+
+    $results | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
+    Write-Host "`n✅ تم حفظ تقرير الجهاز في: $outputFile" -ForegroundColor Green
+    $results | Format-Table
+}
+catch {
+    Write-Warning "❌ حصل خطأ أثناء جمع البيانات: $_"
+}
