@@ -15,6 +15,16 @@ try {
 
     $diskDrives = Get-CimInstance Win32_DiskDrive
 
+    # جلب عنوان IP الفعّال (غير Loopback)
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object { $_.IPAddress -notmatch '^169\.254|^127\.' -and $_.InterfaceAlias -notmatch "Loopback" -and $_.IPAddress }) |
+        Select-Object -First 1 -ExpandProperty IPAddress
+
+    # جلب عنوان MAC من أول كرت فعّال
+    $mac = (Get-NetAdapter |
+        Where-Object { $_.Status -eq "Up" }) |
+        Select-Object -First 1 -ExpandProperty MacAddress
+
     $results = @()
     $first = $true
 
@@ -33,6 +43,8 @@ try {
             OSVersion      = if ($first) { $os.Version } else { "-" }
             CPU            = if ($first) { $cpu.Name } else { "-" }
             RAM_GB         = if ($first) { $ram } else { "-" }
+            IP_Address     = if ($first) { $ip } else { "-" }
+            MAC_Address    = if ($first) { $mac } else { "-" }
             Disk_Model     = $model
             Disk_Type      = $type
             Disk_Size_GB   = $sizeGB
