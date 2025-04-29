@@ -1,4 +1,6 @@
-$outputFile = "C:\LocalComputerInfo.csv"
+$computerName = $env:COMPUTERNAME
+$dateStamp = Get-Date -Format "yyyy-MM-dd"
+$outputFile = "C:\${computerName}_$dateStamp.csv"
 
 if (Test-Path $outputFile) {
     Write-Host "⚠️ الملف موجود بالفعل، سيتم استبداله: $outputFile" -ForegroundColor Yellow
@@ -11,16 +13,14 @@ try {
     $ram = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2)
     $bios = Get-CimInstance Win32_BIOS
     $cs = Get-CimInstance Win32_ComputerSystem
-    $computerName = $env:COMPUTERNAME
+    $username = $env:USERNAME
 
     $diskDrives = Get-CimInstance Win32_DiskDrive
 
-    # جلب عنوان IP الفعّال (غير Loopback)
     $ip = (Get-NetIPAddress -AddressFamily IPv4 |
         Where-Object { $_.IPAddress -notmatch '^169\.254|^127\.' -and $_.InterfaceAlias -notmatch "Loopback" -and $_.IPAddress }) |
         Select-Object -First 1 -ExpandProperty IPAddress
 
-    # جلب عنوان MAC من أول كرت فعّال
     $mac = (Get-NetAdapter |
         Where-Object { $_.Status -eq "Up" }) |
         Select-Object -First 1 -ExpandProperty MacAddress
@@ -39,6 +39,7 @@ try {
 
         $results += [PSCustomObject]@{
             ComputerName   = if ($first) { $computerName } else { "-" }
+            Username       = if ($first) { $username } else { "-" }
             OS             = if ($first) { $os.Caption } else { "-" }
             OSVersion      = if ($first) { $os.Version } else { "-" }
             CPU            = if ($first) { $cpu.Name } else { "-" }
