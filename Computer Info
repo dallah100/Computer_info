@@ -1,110 +1,109 @@
-$outputFile = "C:\SystemReport.csv"
-$to = "someone@example.com"  # فقط للعرض
+# ============================
+# PowerShell Script - PC Full Info Report (All Disks & NICs, No Repeated Info)
+# ============================
 
-if (Test-Path $outputFile) {
-    Remove-Item $outputFile -Force
+# Gather general system info
+$ComputerName = $env:COMPUTERNAME
+$UserName = $env:USERNAME
+$OS = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption
+$CPU = Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
+$RAM = "{0:N2} GB" -f ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+
+# Check installed applications
+$InstalledApps = Get-ItemProperty HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*,
+                              HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
+                  Select-Object DisplayName
+
+function Check-App($name) {
+    if ($InstalledApps.DisplayName -match $name) {
+        return "Installed"
+    } else {
+        return "Not Installed"
+    }
 }
 
-try {
-    $os  = Get-CimInstance Win32_OperatingSystem
-    $cpu = Get-CimInstance Win32_Processor
-    $ram = [math]::Round($os.TotalVisibleMemorySize / (1024 * 1024), 2)
-    $bios = Get-CimInstance Win32_BIOS
-    $cs = Get-CimInstance Win32_ComputerSystem
-    $username = $env:USERNAME
-    $computerName = $env:COMPUTERNAME
+$VNC = Check-App "VNC Server"
+$OutputMessenger = Check-App "Output Messenger"
+$Bitdefender = Check-App "Bitdefender"
 
-    $diskDrives = Get-CimInstance Win32_DiskDrive
-    $netAdapters = Get-NetAdapter
-    $netIPs = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch '^169\.254|^127\.' }
+# Get all disks and networks
+$Disks = Get-CimInstance Win32_DiskDrive
+$Networks = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
 
-    $results = @()
-    $first = $true
+# Prepare output list
+$Output = @()
+$first = $true
 
-    foreach ($disk in $diskDrives) {
-        $model = $disk.Model
-        $sizeGB = [math]::Round($disk.Size / 1GB, 2)
-        $type = if ($model -match "SSD") { "SSD" }
-                elseif ($model -match "NVMe" -or $model -match "M.2") { "NVMe/M.2" }
-                else { "HDD" }
-
-        $serial = ($disk | Get-CimAssociatedInstance -ResultClassName Win32_PhysicalMedia).SerialNumber
-
-        $results += [PSCustomObject]@{
-            ComputerName   = if ($first) { $computerName } else { "-" }
-            Username       = if ($first) { $username } else { "-" }
-            OS             = if ($first) { $os.Caption } else { "-" }
-            OSVersion      = if ($first) { $os.Version } else { "-" }
-            CPU            = if ($first) { $cpu.Name } else { "-" }
-            RAM_GB         = if ($first) { $ram } else { "-" }
-            Network_Name   = "-"
-            MAC_Address    = "-"
-            IP_Address     = "-"
-            Disk_Model     = $model
-            Disk_Type      = $type
-            Disk_Size_GB   = $sizeGB
-            Disk_Serial    = $serial
-            Serial_Number  = if ($first) { $bios.SerialNumber } else { "-" }
-            Manufacturer   = if ($first) { $cs.Manufacturer } else { "-" }
-            Model          = if ($first) { $cs.Model } else { "-" }
-        }
-
-        $first = $false
+foreach ($disk in $Disks) {
+    $diskInfo = @{
+        DiskModel = $disk.Model
+        DiskSize  = "{0:N2} GB" -f ($disk.Size / 1GB)
     }
 
-    foreach ($adapter in $netAdapters) {
-        $adapterName = $adapter.Name
-        $macAddress = $adapter.MacAddress
-
-        $ips = $netIPs | Where-Object { $_.InterfaceAlias -eq $adapterName }
-
-        if ($ips.Count -eq 0) {
-            $results += [PSCustomObject]@{
-                ComputerName   = "-"
-                Username       = "-"
-                OS             = "-"
-                OSVersion      = "-"
-                CPU            = "-"
-                RAM_GB         = "-"
-                Network_Name   = $adapterName
-                MAC_Address    = $macAddress
-                IP_Address     = "N/A"
-                Disk_Model     = "-"
-                Disk_Type      = "-"
-                Disk_Size_GB   = "-"
-                Disk_Serial    = "-"
-                Serial_Number  = "-"
-                Manufacturer   = "-"
-                Model          = "-"
-            }
-        } else {
-            foreach ($ipObj in $ips) {
-                $results += [PSCustomObject]@{
-                    ComputerName   = "-"
-                    Username       = "-"
-                    OS             = "-"
-                    OSVersion      = "-"
-                    CPU            = "-"
-                    RAM_GB         = "-"
-                    Network_Name   = $adapterName
-                    MAC_Address    = $macAddress
-                    IP_Address     = $ipObj.IPAddress
-                    Disk_Model     = "-"
-                    Disk_Type      = "-"
-                    Disk_Size_GB   = "-"
-                    Disk_Serial    = "-"
-                    Serial_Number  = "-"
-                    Manufacturer   = "-"
-                    Model          = "-"
-                }
-            }
+    # لو أول مرة نحط بيانات عامة
+    $commonInfo = if ($first) {
+        @{
+            ComputerName     = $ComputerName
+            Username         = $UserName
+            OS               = $OS
+            CPU              = $CPU
+            RAM              = $RAM
+            VNC_Server       = $VNC
+            Output_Messenger = $OutputMessenger
+            Bitdefender      = $Bitdefender
+        }
+    } else {
+        @{
+            ComputerName     = "-"
+            Username         = "-"
+            OS               = "-"
+            CPU              = "-"
+            RAM              = "-"
+            VNC_Server       = "-"
+            Output_Messenger = "-"
+            Bitdefender      = "-"
         }
     }
 
-    $results | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
-    Write-Host "`n✅ تم حفظ تقرير الجهاز في: $outputFile" -ForegroundColor Green
-    Write-Host "📧 تم إرسال التقرير إلى: $to" -ForegroundColor Cyan
+    $first = $false
+
+    $Output += [PSCustomObject]@{
+        ComputerName       = $commonInfo.ComputerName
+        Username           = $commonInfo.Username
+        OS                 = $commonInfo.OS
+        CPU                = $commonInfo.CPU
+        RAM                = $commonInfo.RAM
+        NetworkName        = "-"
+        MACAddress         = "-"
+        IPAddress          = "-"
+        DiskModel          = $diskInfo.DiskModel
+        DiskSize           = $diskInfo.DiskSize
+        VNC_Server         = $commonInfo.VNC_Server
+        Output_Messenger   = $commonInfo.Output_Messenger
+        Bitdefender        = $commonInfo.Bitdefender
+    }
 }
-catch {
-    Write-Warning "❌ حصل خطأ أثناء تنفيذ السكربت: $_"
+
+foreach ($net in $Networks) {
+    $Output += [PSCustomObject]@{
+        ComputerName       = "-"
+        Username           = "-"
+        OS                 = "-"
+        CPU                = "-"
+        RAM                = "-"
+        NetworkName        = $net.Description
+        MACAddress         = $net.MACAddress
+        IPAddress          = $net.IPAddress[0]
+        DiskModel          = "-"
+        DiskSize           = "-"
+        VNC_Server         = "-"
+        Output_Messenger   = "-"
+        Bitdefender        = "-"
+    }
 }
+
+# Export to CSV
+$CSVPath = "C:\PC_Full_Info.csv"
+$Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8
+
+Write-Host "✅ تم إنشاء تقرير شامل بدون تكرار في: $CSVPath"
