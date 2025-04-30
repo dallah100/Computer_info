@@ -2,80 +2,47 @@
 # PowerShell Script - PC Full Info Report (With Disk Type Detection)
 # ============================
 
-# Gather general system info
+# General system info
 $ComputerName = $env:COMPUTERNAME
 $UserName = $env:USERNAME
 $OS = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption
 $CPU = Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
 $RAM = "{0:N2} GB" -f ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
 
-# Check installed applications
-$InstalledApps = Get-ItemProperty HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*,
-                              HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
-                  Select-Object DisplayName
+# Installed applications
+$InstalledApps = Get-ItemProperty HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*, `
+HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Select-Object DisplayName
 
 function Check-App($name) {
-    if ($InstalledApps.DisplayName -match $name) {
-        return "Installed"
-    } else {
-        return "Not Installed"
-    }
+    if ($InstalledApps.DisplayName -match $name) { return "Installed" }
+    else { return "Not Installed" }
 }
 
 $VNC = Check-App "VNC Server"
 $OutputMessenger = Check-App "Output Messenger"
 $Bitdefender = Check-App "Bitdefender"
 
-# Get all disks and networks
+# Disk & Network Info
 $Disks = Get-CimInstance Win32_DiskDrive
 $Networks = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
 
-# Function to determine disk type
+# Function to detect disk type
 function Get-DiskType {
-    param([string]$model, [string]$mediaType, [string]$interfaceType)
-
-    # Check MediaType directly for SSD and HDD
-    if ($mediaType -match "Solid State") {
-        return "SSD"
-    } elseif ($mediaType -match "Hard Disk") {
-        return "HDD"
-    }
-
-    # If MediaType is unknown, check InterfaceType for M.2 or NVMe
-    if ($interfaceType -match "NVMe|M\.2") {
-        return "M.2"
-    }
-
-    # Check specific models like HGST, Seagate, etc. for HDD
-    if ($model -match "HGST|Seagate|ST1000DM") {
-        return "HDD"
-    }
-
-    # If the model contains "SSD" in the name, classify it as SSD
-    if ($model -match "SSD") {
-        return "SSD"
-    }
-
-    # Fallback to unknown or standard classifications
-    if ($model -match "M\.2") {
-        return "M.2"
-    } elseif ($model -match "HDD") {
-        return "HDD"
-    } else {
-        return "Unknown"
-    }
+    param($mediaType, $busType, $model)
+    if ($mediaType -match "SSD") { return "SSD" }
+    elseif ($mediaType -match "HDD") { return "HDD" }
+    elseif ($busType -eq 17) { return "NVMe" }
+    elseif ($model -match "M\.2|NVMe") { return "M.2" }
+    else { return "Unknown" }
 }
 
-# Prepare output list
+# Output prep
 $Output = @()
 $first = $true
 
-# Loop over Disks
 foreach ($disk in $Disks) {
-    # Determine disk type using model, mediaType, and interfaceType
-    $DiskType = Get-DiskType $disk.Model $disk.MediaType $disk.InterfaceType
+    $DiskType = Get-DiskType $disk.MediaType $disk.BusType $disk.Model
 
-    # لو أول مرة نحط بيانات عامة
     $commonInfo = if ($first) {
         @{
             ComputerName     = $ComputerName
@@ -102,7 +69,6 @@ foreach ($disk in $Disks) {
 
     $first = $false
 
-    # Add disk information to output
     $Output += [PSCustomObject]@{
         ComputerName       = $commonInfo.ComputerName
         Username           = $commonInfo.Username
@@ -114,13 +80,13 @@ foreach ($disk in $Disks) {
         IPAddress          = "-"
         DiskModel          = $disk.Model
         DiskSize           = "{0:N2} GB" -f ($disk.Size / 1GB)
+        DiskType           = $DiskType
         VNC_Server         = $commonInfo.VNC_Server
         Output_Messenger   = $commonInfo.Output_Messenger
         Bitdefender        = $commonInfo.Bitdefender
     }
 }
 
-# Add network information if available
 foreach ($net in $Networks) {
     $Output += [PSCustomObject]@{
         ComputerName       = "-"
@@ -133,13 +99,14 @@ foreach ($net in $Networks) {
         IPAddress          = $net.IPAddress[0]
         DiskModel          = "-"
         DiskSize           = "-"
+        DiskType           = "-"
         VNC_Server         = "-"
         Output_Messenger   = "-"
         Bitdefender        = "-"
     }
 }
 
-# Export to CSV
+# Export result to CSV
 $CSVPath = "C:\PC_Full_Info.csv"
 $Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8
 
