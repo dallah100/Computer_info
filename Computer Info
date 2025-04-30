@@ -32,7 +32,23 @@ $Networks = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $
 
 # Function to determine disk type
 function Get-DiskType {
-    param([string]$model)
+    param([string]$model, [string]$mediaType, [string]$interfaceType)
+    
+    # Checking MediaType (SSD, HDD) directly
+    if ($mediaType -match "Solid State") {
+        return "SSD"
+    } elseif ($mediaType -match "Hard Disk") {
+        return "HDD"
+    }
+    
+    # If MediaType is unknown, check InterfaceType for further clues
+    if ($interfaceType -match "NVMe|M\.2") {
+        return "M.2"
+    } elseif ($interfaceType -match "SATA") {
+        return "HDD"
+    }
+
+    # Fallback to the model if still unknown
     if ($model -match "SSD") {
         return "SSD"
     } elseif ($model -match "M\.2|NVMe") {
@@ -49,8 +65,8 @@ $Output = @()
 $first = $true
 
 foreach ($disk in $Disks) {
-    # Determine disk type
-    $DiskType = Get-DiskType $disk.Model
+    # Determine disk type using model, mediaType, and interfaceType
+    $DiskType = Get-DiskType $disk.Model $disk.MediaType $disk.InterfaceType
 
     # لو أول مرة نحط بيانات عامة
     $commonInfo = if ($first) {
