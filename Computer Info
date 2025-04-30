@@ -140,7 +140,7 @@ foreach ($net in $Networks) {
 }
 
 # Export to CSV
-$CSVPath = "$env:USERPROFILE\Desktop\PC_Full_Info.csv"
+$CSVPath = "C:\PC_Full_Info.csv"
 $Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8
 
 Write-Host "✅ تم إنشاء التقرير في: $CSVPath"
