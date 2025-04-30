@@ -1,5 +1,5 @@
 # ============================
-# PowerShell Script - PC Full Info Report (All Disks & NICs, No Repeated Info)
+# PowerShell Script - PC Full Info Report (With Disk Type Detection)
 # ============================
 
 # Gather general system info
@@ -30,15 +30,27 @@ $Bitdefender = Check-App "Bitdefender"
 $Disks = Get-CimInstance Win32_DiskDrive
 $Networks = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
 
+# Function to determine disk type
+function Get-DiskType {
+    param([string]$model)
+    if ($model -match "SSD") {
+        return "SSD"
+    } elseif ($model -match "M\.2|NVMe") {
+        return "M.2"
+    } elseif ($model -match "HDD|ST") {
+        return "HDD"
+    } else {
+        return "Unknown"
+    }
+}
+
 # Prepare output list
 $Output = @()
 $first = $true
 
 foreach ($disk in $Disks) {
-    $diskInfo = @{
-        DiskModel = $disk.Model
-        DiskSize  = "{0:N2} GB" -f ($disk.Size / 1GB)
-    }
+    # Determine disk type
+    $DiskType = Get-DiskType $disk.Model
 
     # لو أول مرة نحط بيانات عامة
     $commonInfo = if ($first) {
@@ -76,8 +88,9 @@ foreach ($disk in $Disks) {
         NetworkName        = "-"
         MACAddress         = "-"
         IPAddress          = "-"
-        DiskModel          = $diskInfo.DiskModel
-        DiskSize           = $diskInfo.DiskSize
+        DiskModel          = $disk.Model
+        DiskSize           = "{0:N2} GB" -f ($disk.Size / 1GB)
+        DiskType           = $DiskType
         VNC_Server         = $commonInfo.VNC_Server
         Output_Messenger   = $commonInfo.Output_Messenger
         Bitdefender        = $commonInfo.Bitdefender
@@ -96,6 +109,7 @@ foreach ($net in $Networks) {
         IPAddress          = $net.IPAddress[0]
         DiskModel          = "-"
         DiskSize           = "-"
+        DiskType           = "-"
         VNC_Server         = "-"
         Output_Messenger   = "-"
         Bitdefender        = "-"
@@ -106,4 +120,4 @@ foreach ($net in $Networks) {
 $CSVPath = "C:\PC_Full_Info.csv"
 $Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8
 
-Write-Host "✅ تم إنشاء تقرير شامل بدون تكرار في: $CSVPath"
+Write-Host "✅ تم إنشاء التقرير في: $CSVPath"
