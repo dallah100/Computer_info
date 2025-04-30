@@ -1,24 +1,30 @@
+# تحديد المسار لحفظ الملف على قرص C
+$outputFile = "C:\SystemReport.csv"
+$to = "someone@example.com"  # فقط للعرض
+
+# حذف الملف لو موجود
 if (Test-Path $outputFile) {
     Remove-Item $outputFile -Force
 }
 
 try {
+    # الحصول على معلومات النظام
     $os  = Get-CimInstance Win32_OperatingSystem
     $cpu = Get-CimInstance Win32_Processor
-    $ram = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2)
+    $ram = [math]::Round($os.TotalVisibleMemorySize / (1024 * 1024), 2)
     $bios = Get-CimInstance Win32_BIOS
     $cs = Get-CimInstance Win32_ComputerSystem
     $username = $env:USERNAME
+    $computerName = $env:COMPUTERNAME
 
     $diskDrives = Get-CimInstance Win32_DiskDrive
-    # تعديل لجلب جميع كروت الشبكة، حتى الغير مفعلة
     $netAdapters = Get-NetAdapter
     $netIPs = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch '^169\.254|^127\.' }
 
     $results = @()
     $first = $true
 
-    # استخراج معلومات الأقراص
+    # معلومات الأقراص
     foreach ($disk in $diskDrives) {
         $model = $disk.Model
         $sizeGB = [math]::Round($disk.Size / 1GB, 2)
@@ -50,12 +56,13 @@ try {
         $first = $false
     }
 
-    # استخراج معلومات الشبكة
+    # معلومات الشبكة
     foreach ($adapter in $netAdapters) {
         $adapterName = $adapter.Name
         $macAddress = $adapter.MacAddress
 
         $ips = $netIPs | Where-Object { $_.InterfaceAlias -eq $adapterName }
+
         if ($ips.Count -eq 0) {
             $results += [PSCustomObject]@{
                 ComputerName   = "-"
@@ -99,10 +106,9 @@ try {
         }
     }
 
-    # تصدير البيانات إلى ملف CSV
+    # تصدير البيانات إلى CSV
     $results | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
     Write-Host "`n✅ تم حفظ تقرير الجهاز في: $outputFile" -ForegroundColor Green
-
     Write-Host "📧 تم إرسال التقرير إلى: $to" -ForegroundColor Cyan
 }
 catch {
