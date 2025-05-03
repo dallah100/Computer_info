@@ -6,7 +6,6 @@ try {
     Enable-PSRemoting -Force -ErrorAction Stop
     Set-Service -Name WinRM -StartupType Automatic
     Start-Service -Name WinRM
-    New-NetFirewallRule -Name "WinRM_HTTP" -DisplayName "WinRM over HTTP" -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue
     Write-Host "✅ تم تفعيل WinRM بنجاح.`n" -ForegroundColor Green
 } catch {
     Write-Host "❌ حدث خطأ أثناء تفعيل WinRM: $_" -ForegroundColor Red
