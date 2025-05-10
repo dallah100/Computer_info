@@ -89,6 +89,7 @@ foreach ($disk in $Disks) {
         VNC_Server         = $commonInfo.VNC_Server
         Output_Messenger   = $commonInfo.Output_Messenger
         Bitdefender        = $commonInfo.Bitdefender
+        SerialNumber       = $commonInfo.SerialNumber
     }
 }
 
