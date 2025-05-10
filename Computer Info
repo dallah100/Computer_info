@@ -95,22 +95,9 @@ foreach ($disk in $Disks) {
 
 foreach ($net in $Networks) {
     $Output += [PSCustomObject]@{
-        ComputerName       = "-"
-        Username           = "-"
-        OS                 = "-"
-        CPU                = "-"
-        RAM                = "-"
-        SerialNumber       = "-" 
         NetworkName        = $net.Description
         MACAddress         = $net.MACAddress
         IPAddress          = $net.IPAddress[0]
-        DiskFriendlyName   = "-"
-        DiskBusType        = "-"
-        DiskMediaType      = "-"
-        VNC_Server         = "-"
-        Output_Messenger   = "-"
-        Bitdefender        = "-"
-
     }
 }
 
