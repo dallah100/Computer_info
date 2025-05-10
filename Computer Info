@@ -3,13 +3,13 @@
 # ============================
 
 try {
-    Enable-PSRemoting -Force -ErrorAction Stop
-    Set-Service -Name WinRM -StartupType Automatic
-    Start-Service -Name WinRM
-    New-NetFirewallRule -DisplayName "WinRM Manual" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -Profile Public
+    Enable-PSRemoting -Force -ErrorAction Stop *> $null
+    Set-Service -Name WinRM -StartupType Automatic *> $null
+    Start-Service -Name WinRM *> $null
+    New-NetFirewallRule -DisplayName "WinRM Manual" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -Profile Public *> $null
     # Write-Host "✅ تم تفعيل WinRM بنجاح.`n" -ForegroundColor Green
 } catch {
-    # Write-Host "❌ حدث خطأ أثناء تفعيل WinRM: $_" -ForegroundColor Red
+     Write-Host "❌ حدث خطأ أثناء تفعيل WinRM: $_" -ForegroundColor Red
 }
 
 # Gather general system info
@@ -103,6 +103,6 @@ foreach ($net in $Networks) {
 
 # Export to CSV
 $CSVPath = "C:\PC_Full_Info.csv"
-$Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8
+$Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8 *> $null
 
-# Write-Host "✅ تم إنشاء التقرير في: $CSVPath"
+ Write-Host "✅ Done
