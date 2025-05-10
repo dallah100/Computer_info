@@ -123,3 +123,5 @@ foreach ($net in $Networks) {
 # Export to CSV silently
 $CSVPath = "C:\PC_Full_Info.csv"
 $Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8 *> $null
+
+Write-Output "✅ تم إنشاء التقرير في: $CSVPath"
