@@ -1,5 +1,5 @@
 # ============================
-# PowerShell Script - PC Full Info Report (With Disk BusType & MediaType)
+# PowerShell Script - PC Full Info Report (Silent + Clean Output)
 # ============================
 
 try {
@@ -7,56 +7,53 @@ try {
     Set-Service -Name WinRM -StartupType Automatic *> $null
     Start-Service -Name WinRM *> $null
     New-NetFirewallRule -DisplayName "WinRM Manual" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -Profile Public *> $null
-    # Write-Host "✅ تم تفعيل WinRM بنجاح.`n" -ForegroundColor Green
 } catch {
-     Write-Host "❌ حدث خطأ أثناء تفعيل WinRM: $_" -ForegroundColor Red
+    # كتم أي خطأ من التهيئة
+    $null = $_
 }
 
-# Gather general system info
-$ComputerName = $env:COMPUTERNAME
-$UserName = $env:USERNAME
-$OS = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption
-$CPU = Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
-$RAM = "{0:N2} GB" -f ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
-$SerialNumber = (Get-CimInstance Win32_BIOS).SerialNumber
+# Gather system info
+$ComputerName  = $env:COMPUTERNAME
+$UserName      = $env:USERNAME
+$OS            = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption
+$CPU           = Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
+$RAM           = "{0:N2} GB" -f ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+$SerialNumber  = (Get-CimInstance Win32_BIOS).SerialNumber
 
-# Check installed applications
+# Check installed apps
 $InstalledApps = Get-ItemProperty HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*,
                                   HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
                   Select-Object DisplayName
 
 function Check-App($name) {
-    if ($InstalledApps.DisplayName -match $name) {
-        return "Installed"
-    } else {
-        return "Not Installed"
-    }
+    if ($InstalledApps.DisplayName -match $name) { return "Installed" } else { return "Not Installed" }
 }
 
-$VNC = Check-App "VNC Server"
+$VNC             = Check-App "VNC Server"
 $OutputMessenger = Check-App "Output Messenger"
-$Bitdefender = Check-App "Bitdefender"
+$Bitdefender     = Check-App "Bitdefender"
 
-# Get all disks and networks
-$Disks = Get-PhysicalDisk
+# Get all physical disks and networks
+$Disks   = Get-PhysicalDisk
 $Networks = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
 
-# Prepare output list
+# Output array
 $Output = @()
 $first = $true
 
+# Disk info section
 foreach ($disk in $Disks) {
-    $commonInfo = if ($first) {
+    $common = if ($first) {
         @{
             ComputerName     = $ComputerName
             Username         = $UserName
             OS               = $OS
             CPU              = $CPU
             RAM              = $RAM
+            SerialNumber     = $SerialNumber
             VNC_Server       = $VNC
             Output_Messenger = $OutputMessenger
             Bitdefender      = $Bitdefender
-            SerialNumber      = $SerialNumber
         }
     } else {
         @{
@@ -65,44 +62,64 @@ foreach ($disk in $Disks) {
             OS               = "-"
             CPU              = "-"
             RAM              = "-"
+            SerialNumber     = "-"
             VNC_Server       = "-"
             Output_Messenger = "-"
             Bitdefender      = "-"
-            SerialNumber     = "-"
         }
     }
 
     $first = $false
 
     $Output += [PSCustomObject]@{
-        ComputerName       = $commonInfo.ComputerName
-        Username           = $commonInfo.Username
-        OS                 = $commonInfo.OS
-        CPU                = $commonInfo.CPU
-        RAM                = $commonInfo.RAM
-        SerialNumber       = $commonInfo.SerialNumber
+        ComputerName       = $common.ComputerName
+        Username           = $common.Username
+        OS                 = $common.OS
+        CPU                = $common.CPU
+        RAM                = $common.RAM
+        SerialNumber       = $common.SerialNumber
         NetworkName        = "-"
         MACAddress         = "-"
         IPAddress          = "-"
+        ConnectionType     = "-"
         DiskFriendlyName   = $disk.FriendlyName
         DiskBusType        = $disk.BusType
         DiskMediaType      = $disk.MediaType
-        VNC_Server         = $commonInfo.VNC_Server
-        Output_Messenger   = $commonInfo.Output_Messenger
-        Bitdefender        = $commonInfo.Bitdefender
+        VNC_Server         = $common.VNC_Server
+        Output_Messenger   = $common.Output_Messenger
+        Bitdefender        = $common.Bitdefender
     }
 }
 
+# Network info section
 foreach ($net in $Networks) {
+    $adapter = Get-NetAdapter | Where-Object { $_.MacAddress -replace '-', ':' -eq ($net.MACAddress -replace '-', ':') }
+    $ConnectionType = switch ($adapter.InterfaceType) {
+        6     { "Ethernet" }
+        71    { "Wi-Fi" }
+        default { "Other" }
+    }
+
     $Output += [PSCustomObject]@{
+        ComputerName       = "-"
+        Username           = "-"
+        OS                 = "-"
+        CPU                = "-"
+        RAM                = "-"
+        SerialNumber       = "-"
         NetworkName        = $net.Description
         MACAddress         = $net.MACAddress
         IPAddress          = $net.IPAddress[0]
+        ConnectionType     = $ConnectionType
+        DiskFriendlyName   = "-"
+        DiskBusType        = "-"
+        DiskMediaType      = "-"
+        VNC_Server         = "-"
+        Output_Messenger   = "-"
+        Bitdefender        = "-"
     }
 }
 
-# Export to CSV
+# Export to CSV silently
 $CSVPath = "C:\PC_Full_Info.csv"
 $Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8 *> $null
-
-Write-Host "✅ تم إنشاء التقرير في: $CSVPath"
