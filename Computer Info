@@ -18,6 +18,7 @@ $UserName = $env:USERNAME
 $OS = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption
 $CPU = Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
 $RAM = "{0:N2} GB" -f ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+$SerialNumber = (Get-CimInstance Win32_BIOS).SerialNumber
 
 # Check installed applications
 $InstalledApps = Get-ItemProperty HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*,
@@ -55,6 +56,7 @@ foreach ($disk in $Disks) {
             VNC_Server       = $VNC
             Output_Messenger = $OutputMessenger
             Bitdefender      = $Bitdefender
+            SerialNumber      = $SerialNumber
         }
     } else {
         @{
@@ -66,6 +68,7 @@ foreach ($disk in $Disks) {
             VNC_Server       = "-"
             Output_Messenger = "-"
             Bitdefender      = "-"
+            SerialNumber     = "-"
         }
     }
 
