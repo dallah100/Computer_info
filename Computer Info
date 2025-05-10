@@ -7,9 +7,9 @@ try {
     Set-Service -Name WinRM -StartupType Automatic
     Start-Service -Name WinRM
     New-NetFirewallRule -DisplayName "WinRM Manual" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -Profile Public
-    Write-Host "✅ تم تفعيل WinRM بنجاح.`n" -ForegroundColor Green
+    # Write-Host "✅ تم تفعيل WinRM بنجاح.`n" -ForegroundColor Green
 } catch {
-    Write-Host "❌ حدث خطأ أثناء تفعيل WinRM: $_" -ForegroundColor Red
+    # Write-Host "❌ حدث خطأ أثناء تفعيل WinRM: $_" -ForegroundColor Red
 }
 
 # Gather general system info
@@ -105,4 +105,4 @@ foreach ($net in $Networks) {
 $CSVPath = "C:\PC_Full_Info.csv"
 $Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8
 
-Write-Host "✅ تم إنشاء التقرير في: $CSVPath"
+# Write-Host "✅ تم إنشاء التقرير في: $CSVPath"
