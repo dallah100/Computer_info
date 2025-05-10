@@ -108,6 +108,8 @@ foreach ($net in $Networks) {
         DiskMediaType      = "-"
         VNC_Server         = "-"
         Output_Messenger   = "-"
+        Bitdefender        = "-"
+
     }
 }
 
