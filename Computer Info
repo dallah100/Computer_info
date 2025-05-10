@@ -80,6 +80,7 @@ foreach ($disk in $Disks) {
         OS                 = $commonInfo.OS
         CPU                = $commonInfo.CPU
         RAM                = $commonInfo.RAM
+        SerialNumber       = $commonInfo.SerialNumber
         NetworkName        = "-"
         MACAddress         = "-"
         IPAddress          = "-"
@@ -89,7 +90,6 @@ foreach ($disk in $Disks) {
         VNC_Server         = $commonInfo.VNC_Server
         Output_Messenger   = $commonInfo.Output_Messenger
         Bitdefender        = $commonInfo.Bitdefender
-        SerialNumber       = $commonInfo.SerialNumber
     }
 }
 
@@ -108,7 +108,6 @@ foreach ($net in $Networks) {
         DiskMediaType      = "-"
         VNC_Server         = "-"
         Output_Messenger   = "-"
-        Bitdefender        = "-"
     }
 }
 
