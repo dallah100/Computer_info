@@ -71,6 +71,9 @@ foreach ($disk in $Disks) {
 
     $first = $false
 
+    # الحصول على حجم القرص فقط
+    $DiskSize = "{0:N2} GB" -f ($disk.Size / 1GB)
+
     $Output += [PSCustomObject]@{
         ComputerName       = $common.ComputerName
         Username           = $common.Username
@@ -85,6 +88,7 @@ foreach ($disk in $Disks) {
         DiskFriendlyName   = $disk.FriendlyName
         DiskBusType        = $disk.BusType
         DiskMediaType      = $disk.MediaType
+        DiskSize           = $DiskSize  # فقط عرض الحجم الكلي للقرص
         VNC_Server         = $common.VNC_Server
         Output_Messenger   = $common.Output_Messenger
         Bitdefender        = $common.Bitdefender
@@ -114,6 +118,7 @@ foreach ($net in $Networks) {
         DiskFriendlyName   = "-"
         DiskBusType        = "-"
         DiskMediaType      = "-"
+        DiskSize           = "-"  # لا يوجد حجم قرص للشبكة
         VNC_Server         = "-"
         Output_Messenger   = "-"
         Bitdefender        = "-"
