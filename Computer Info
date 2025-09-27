@@ -14,11 +14,16 @@ try {
 
 # Gather system info
 $ComputerName  = $env:COMPUTERNAME
-$UserName      = $env:USERNAME
 $OS            = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption
 $CPU           = Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
 $RAM           = "{0:N2} GB" -f ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
 $SerialNumber  = (Get-CimInstance Win32_BIOS).SerialNumber
+
+# Get current logged-in user
+$LoggedInUser = (Get-WmiObject -Class Win32_ComputerSystem).UserName
+if (-not $LoggedInUser) {
+    $LoggedInUser = "No user logged in"
+}
 
 # Check installed apps
 $InstalledApps = Get-ItemProperty HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*,
@@ -46,7 +51,7 @@ foreach ($disk in $Disks) {
     $common = if ($first) {
         @{
             ComputerName     = $ComputerName
-            Username         = $UserName
+            LoggedInUser     = $LoggedInUser
             OS               = $OS
             CPU              = $CPU
             RAM              = $RAM
@@ -58,7 +63,7 @@ foreach ($disk in $Disks) {
     } else {
         @{
             ComputerName     = "-"
-            Username         = "-"
+            LoggedInUser     = "-"
             OS               = "-"
             CPU              = "-"
             RAM              = "-"
@@ -76,7 +81,7 @@ foreach ($disk in $Disks) {
 
     $Output += [PSCustomObject]@{
         ComputerName       = $common.ComputerName
-        Username           = $common.Username
+        LoggedInUser       = $common.LoggedInUser
         OS                 = $common.OS
         CPU                = $common.CPU
         RAM                = $common.RAM
@@ -106,7 +111,7 @@ foreach ($net in $Networks) {
 
     $Output += [PSCustomObject]@{
         ComputerName       = "-"
-        Username           = "-"
+        LoggedInUser       = "-"
         OS                 = "-"
         CPU                = "-"
         RAM                = "-"
