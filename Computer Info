@@ -25,15 +25,6 @@ if (!(Test-Path $tempDir)) {
 }
 
 # ============================
-# ENABLE REMOTE (optional)
-# ============================
-try {
-    Enable-PSRemoting -Force -ErrorAction SilentlyContinue
-    Set-Service WinRM -StartupType Automatic
-    Start-Service WinRM
-} catch {}
-
-# ============================
 # CONNECT SHARE
 # ============================
 Write-Host "Connecting to network share..." -ForegroundColor Cyan
@@ -41,33 +32,60 @@ Write-Host "Connecting to network share..." -ForegroundColor Cyan
 New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
 
 # ============================
-# COPY FILES WITH PROGRESS
+# LIVE PROGRESS COPY (REAL-TIME %)
 # ============================
-Write-Host "Copying installer files..." -ForegroundColor Yellow
+Write-Host "Copying files with live progress..." -ForegroundColor Yellow
 
 $files = @("epskit_x64.exe","installer.xml")
-$i = 0
+
 $total = $files.Count
+$i = 0
 
 foreach ($file in $files) {
 
     $i++
-    $percent = [int](($i / $total) * 100)
 
-    Write-Progress `
-        -Activity "Preparing Installation Files" `
-        -Status "Copying $file ($i of $total)" `
-        -PercentComplete $percent
+    $source = "\\192.168.1.23\Prog\$file"
+    $dest   = "$tempDir\$file"
 
-    Copy-Item "ProgShare:\$file" "$tempDir\$file" -Force
+    if (Test-Path $source) {
+
+        # Get file size for real progress
+        $fileSize = (Get-Item $source).Length
+        $bufferSize = 1MB
+
+        $inStream = [System.IO.File]::OpenRead($source)
+        $outStream = [System.IO.File]::Create($dest)
+
+        $buffer = New-Object byte[] $bufferSize
+        $readTotal = 0
+
+        while (($read = $inStream.Read($buffer,0,$buffer.Length)) -gt 0) {
+
+            $outStream.Write($buffer,0,$read)
+            $readTotal += $read
+
+            $percentFile = [math]::Round(($readTotal / $fileSize) * 100)
+
+            $overall = [math]::Round((($i - 1) / $total * 100) + ($percentFile / $total))
+
+            Write-Progress `
+                -Activity "Copying Installation Files" `
+                -Status "$file ($percentFile%)" `
+                -PercentComplete $overall
+        }
+
+        $inStream.Close()
+        $outStream.Close()
+    }
 }
 
-Write-Progress -Activity "Preparing Installation Files" -Completed
+Write-Progress -Activity "Copying Installation Files" -Completed
 
 Remove-PSDrive ProgShare
 
 # ============================
-# INSTALL BITDEFENDER (FIXED)
+# INSTALL BITDEFENDER
 # ============================
 Write-Host "Installing Bitdefender..." -ForegroundColor Yellow
 
@@ -96,7 +114,7 @@ try {
 Start-Sleep -Seconds 10
 
 # ============================
-# SYSTEM INFO (AFTER INSTALL)
+# SYSTEM INFO
 # ============================
 Write-Host "Collecting system data..." -ForegroundColor Cyan
 
@@ -114,7 +132,6 @@ function Add-Row($Section,$Key,$Value){
     }
 }
 
-# GENERAL
 Add-Row "General" "Computer Name" $CompName
 Add-Row "General" "CPU" $CPU
 Add-Row "General" "OS" $OSInfo.Caption
@@ -144,7 +161,7 @@ $Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninsta
 Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"Installed"} else {"Not Found"}))
 
 # ============================
-# EXPORT CSV (AFTER INSTALL)
+# EXPORT CSV
 # ============================
 Write-Host "Exporting CSV..." -ForegroundColor Green
 
