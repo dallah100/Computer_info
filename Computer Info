@@ -1,73 +1,94 @@
 
 # ============================
-# Credential
+# SETTINGS
 # ============================
-$credPath = "$env:APPDATA\prog_cred.xml"
+$CompName = $env:COMPUTERNAME
+$UserName = $env:USERNAME
 
-if (Test-Path $credPath) {
-    $cred = Import-Clixml $credPath
-} else {
-    Write-Host "First run - enter credentials:" -ForegroundColor Yellow
-    $username = Read-Host "Username"
-    $password = Read-Host "Password" -AsSecureString
-    $cred = New-Object System.Management.Automation.PSCredential ($username, $password)
-    $cred | Export-Clixml $credPath
-}
+$NetworkPath = "\\192.168.1.23\info pc"
+$tempDir = "C:\Bitdefender"
+
+$maxRetries = 5
+$retryDelay = 120  # 2 minutes
+
+Write-Host "Starting process..." -ForegroundColor Cyan
 
 # ============================
 # CONNECT SHARE
 # ============================
 Write-Host "Connecting to network share..." -ForegroundColor Cyan
 
+$cred = Get-Credential
 New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
 
 # ============================
-# LOCAL FOLDER
+# CREATE LOCAL FOLDER
 # ============================
-$tempDir = "C:\Bitdefender"
-
 if (!(Test-Path $tempDir)) {
     New-Item -ItemType Directory -Path $tempDir | Out-Null
 }
 
 # ============================
-# COPY FILES
+# COPY FILES TO C:
 # ============================
 Write-Host "Copying files..." -ForegroundColor Yellow
 
-$files = @("epskit_x64.exe","installer.xml")
-
-foreach ($file in $files) {
-    Copy-Item "ProgShare:\$file" "$tempDir\$file" -Force
-}
+Copy-Item "ProgShare:\epskit_x64.exe" "$tempDir\epskit_x64.exe" -Force
+Copy-Item "ProgShare:\installer.xml" "$tempDir\installer.xml" -Force
 
 Remove-PSDrive ProgShare
 
 # ============================
-# INSTALL BITDEFENDER
+# FUNCTION: CHECK INSTALL
 # ============================
-Write-Host "Installing Bitdefender..." -ForegroundColor Yellow
+function Check-Bitdefender {
+    $apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
+                            HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
+                            -ErrorAction SilentlyContinue
 
-$exe = "$tempDir\epskit_x64.exe"
-$xml = "$tempDir\installer.xml"
-
-$cmd = "`"$exe`" -runInstaller -installerXml `"$xml`" -v"
-
-$process = Start-Process "cmd.exe" `
-    -ArgumentList "/c $cmd" `
-    -Verb RunAs `
-    -WindowStyle Hidden `
-    -PassThru `
-    -Wait
-
-Start-Sleep -Seconds 10
+    return ($apps.DisplayName -match "Bitdefender")
+}
 
 # ============================
-# SYSTEM INFO
+# INSTALL WITH RETRY
+# ============================
+$installed = $false
+$try = 0
+
+while (-not $installed -and $try -lt $maxRetries) {
+
+    $try++
+    Write-Host "Installation attempt $try..." -ForegroundColor Yellow
+
+    $exe = "$tempDir\epskit_x64.exe"
+    $xml = "$tempDir\installer.xml"
+
+    $cmd = "`"$exe`" -runInstaller -installerXml `"$xml`" -v"
+
+    $process = Start-Process "cmd.exe" `
+        -ArgumentList "/c $cmd" `
+        -Verb RunAs `
+        -WindowStyle Hidden `
+        -PassThru
+
+    $process.WaitForExit()
+
+    Start-Sleep -Seconds 10
+
+    if (Check-Bitdefender) {
+        $installed = $true
+        Write-Host "Bitdefender installed ✔" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Not installed yet ❌ retrying..." -ForegroundColor Red
+        Start-Sleep -Seconds $retryDelay
+    }
+}
+
+# ============================
+# SYSTEM INFO COLLECTION
 # ============================
 Write-Host "Collecting system data..." -ForegroundColor Cyan
-
-$CompName = $env:COMPUTERNAME
 
 $OSInfo = Get-CimInstance Win32_OperatingSystem
 $CPU = (Get-CimInstance Win32_Processor).Name
@@ -85,7 +106,7 @@ function Add-Row($Section,$Key,$Value){
 
 # GENERAL
 Add-Row "General" "Computer Name" $CompName
-Add-Row "General" "User" $env:USERNAME
+Add-Row "General" "User" $UserName
 Add-Row "General" "CPU" $CPU
 Add-Row "General" "OS" $OSInfo.Caption
 Add-Row "General" "Serial" $BIOS.SerialNumber
@@ -109,7 +130,6 @@ Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
 # NETWORK
 Get-NetIPConfiguration |
 Where-Object {$_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback"} |
-Sort-Object InterfaceAlias -Unique |
 ForEach-Object {
     $ip = ($_.IPv4Address | Select-Object -First 1).IPAddress
     $mac = (Get-NetAdapter -Name $_.InterfaceAlias).MacAddress
@@ -133,7 +153,7 @@ try {
     }
 } catch {}
 
-# APPS
+# APPS CHECK
 $Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
                          HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
                          -ErrorAction SilentlyContinue
@@ -143,28 +163,27 @@ Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"In
 Add-Row "Apps" "Output Messenger" ($(if ($Apps.DisplayName -match "Output Messenger") {"Installed"} else {"Not Found"}))
 
 # ============================
-# EXPORT CSV (ONLY IF INSTALL OK)
+# EXPORT CSV
 # ============================
-if ($process.ExitCode -eq 0) {
+Write-Host "Exporting CSV..." -ForegroundColor Green
 
-    Write-Host "Exporting CSV..." -ForegroundColor Green
+$LocalPath = "$env:TEMP\$CompName.csv"
+$FinalPath = "$NetworkPath\$CompName.csv"
 
-    $NetworkPath = "\\192.168.1.23\info pc"
-    $LocalPath = "$env:TEMP\$CompName.csv"
-    $FinalPath = "$NetworkPath\$CompName.csv"
+$Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
+Copy-Item $LocalPath $FinalPath -Force
 
-    $Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
-    Copy-Item $LocalPath $FinalPath -Force
+# ============================
+# CLEANUP (ONLY AFTER EVERYTHING)
+# ============================
+if ($installed) {
 
-    # ============================
-    # CLEANUP (LAST STEP ONLY)
-    # ============================
-    Write-Host "Cleaning files..." -ForegroundColor Cyan
+    Write-Host "Cleaning temp files..." -ForegroundColor Cyan
 
     Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 
     Write-Host "DONE ✔" -ForegroundColor Green
 }
 else {
-    Write-Host "Installation failed - skipping export & cleanup ❌" -ForegroundColor Red
+    Write-Host "Install failed - cleanup skipped ❌" -ForegroundColor Red
 }
