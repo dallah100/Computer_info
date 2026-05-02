@@ -1,38 +1,77 @@
 
 # ============================
-# Load or Create Credential (Console Only)
+# Credential (no GUI prompts)
 # ============================
 $credPath = "$env:APPDATA\prog_cred.xml"
 
 if (Test-Path $credPath) {
-
     $cred = Import-Clixml $credPath
-
 } else {
-
-    Write-Host "First run - enter network credentials:" -ForegroundColor Yellow
-
     $username = Read-Host "Username"
     $password = Read-Host "Password" -AsSecureString
-
     $cred = New-Object System.Management.Automation.PSCredential ($username, $password)
-
     $cred | Export-Clixml $credPath
 }
 
 # ============================
-# Settings
+# TEMP SETUP
 # ============================
 $CompName = $env:COMPUTERNAME
-$NetworkPath = "\\192.168.1.23\info pc"
-$LocalPath = "$env:TEMP\$CompName.csv"
-$FinalPath = "$NetworkPath\$CompName.csv"
+$tempDir = "C:\Temp_BD"
 
-Write-Host "Starting Scan..." -ForegroundColor Cyan
+if (!(Test-Path $tempDir)) {
+    New-Item -ItemType Directory -Path $tempDir | Out-Null
+}
 
 # ============================
-# System Info
+# STEP 1 - ENABLE REMOTE POWERSHELL
 # ============================
+Write-Host "Enabling PowerShell Remoting..." -ForegroundColor Cyan
+
+try {
+    Enable-PSRemoting -Force -ErrorAction SilentlyContinue
+    Set-Service WinRM -StartupType Automatic
+    Start-Service WinRM
+} catch {}
+
+# ============================
+# CONNECT TO SHARE
+# ============================
+Write-Host "Connecting to network share..." -ForegroundColor Cyan
+
+New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
+
+# ============================
+# STEP 2 - COPY INSTALLER
+# ============================
+Write-Host "Copying installer..." -ForegroundColor Yellow
+
+Copy-Item "ProgShare:\epskit_x64.exe" "$tempDir\epskit_x64.exe" -Force
+Copy-Item "ProgShare:\installer.xml" "$tempDir\installer.xml" -Force
+
+Remove-PSDrive ProgShare
+
+# ============================
+# STEP 3 - INSTALL BITDEFENDER
+# ============================
+Write-Host "Installing Bitdefender..." -ForegroundColor Yellow
+
+$process = Start-Process "$tempDir\epskit_x64.exe" `
+    -ArgumentList "-runInstaller -installerXml $tempDir\installer.xml -v" `
+    -PassThru
+
+# wait for installation to finish
+$process.WaitForExit()
+
+Write-Host "Installation completed ✔" -ForegroundColor Green
+
+Start-Sleep -Seconds 10
+
+# ============================
+# STEP 4 - COLLECT SYSTEM DATA
+# ============================
+Write-Host "Collecting system data..." -ForegroundColor Cyan
+
 $OSInfo = Get-CimInstance Win32_OperatingSystem
 $CPU = (Get-CimInstance Win32_Processor).Name
 $BIOS = Get-CimInstance Win32_BIOS
@@ -47,116 +86,49 @@ function Add-Row($Section,$Key,$Value){
     }
 }
 
-# ============================
-# GENERAL
-# ============================
-try {
-    $UserName = (Get-CimInstance Win32_ComputerSystem).UserName
-    if (-not $UserName) { $UserName = "No User Logged In" }
-} catch {
-    $UserName = "Unknown"
-}
-
 Add-Row "General" "Computer Name" $CompName
-Add-Row "General" "User" $UserName
 Add-Row "General" "CPU" $CPU
 Add-Row "General" "OS" $OSInfo.Caption
 Add-Row "General" "Serial" $BIOS.SerialNumber
 Add-Row "General" "Scan Date" (Get-Date)
 
-# ============================
 # RAM
-# ============================
 Get-CimInstance Win32_PhysicalMemory | ForEach-Object {
-    Add-Row "RAM" $_.DeviceLocator "$([math]::Round($_.Capacity/1GB,2)) GB @ $($_.Speed)MHz"
+    Add-Row "RAM" $_.DeviceLocator "$([math]::Round($_.Capacity/1GB,2)) GB"
 }
 
-# ============================
 # DISKS
-# ============================
 Get-PhysicalDisk | ForEach-Object {
-    Add-Row "Disks" $_.FriendlyName "$($_.MediaType) | $($_.HealthStatus) | $([math]::Round($_.Size/1GB,2)) GB"
+    Add-Row "Disks" $_.FriendlyName "$($_.MediaType) | $($_.HealthStatus)"
 }
 
-# ============================
 # PARTITIONS
-# ============================
 Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
-    Add-Row "Partitions" $_.DeviceID "Size: $([math]::Round($_.Size/1GB,2)) GB | Free: $([math]::Round($_.FreeSpace/1GB,2)) GB"
+    Add-Row "Partitions" $_.DeviceID "Free: $([math]::Round($_.FreeSpace/1GB,2)) GB"
 }
 
-# ============================
-# NETWORK
-# ============================
-Get-NetIPConfiguration |
-Where-Object {$_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback"} |
-Sort-Object InterfaceAlias -Unique |
-ForEach-Object {
-    $ip = ($_.IPv4Address | Select-Object -First 1).IPAddress
-    $mac = (Get-NetAdapter -Name $_.InterfaceAlias).MacAddress
-    Add-Row "Network" $_.InterfaceAlias "IP: $ip | MAC: $mac"
-}
+# CHECK BITDEFENDER
+$Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
+                         HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
+                         -ErrorAction SilentlyContinue
+
+Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"Installed"} else {"Not Found"}))
 
 # ============================
-# WIFI (optional)
+# STEP 5 - EXPORT CSV
 # ============================
-try {
-    $profiles = netsh wlan show profiles 2>$null |
-        Select-String "\:(.*)$" |
-        ForEach-Object { $_.Matches.Groups[1].Value.Trim() }
+Write-Host "Exporting CSV..." -ForegroundColor Green
 
-    foreach ($p in $profiles) {
-        $pass = netsh wlan show profile name="$p" key=clear 2>$null |
-            Select-String "Key Content\W+\:(.*)$" |
-            ForEach-Object { $_.Matches.Groups[1].Value.Trim() }
+$NetworkPath = "\\192.168.1.23\info pc"
+$LocalPath = "$env:TEMP\$CompName.csv"
+$FinalPath = "$NetworkPath\$CompName.csv"
 
-        if ($pass) {
-            Add-Row "WiFi" $p $pass
-        }
-    }
-} catch {}
+$Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
+Copy-Item $LocalPath $FinalPath -Force
 
 # ============================
-# EXPORT CSV
+# CLEANUP
 # ============================
-try {
-    $Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
-    Copy-Item $LocalPath $FinalPath -Force
-    Write-Host "CSV Export Done ✔" -ForegroundColor Green
-} catch {
-    Write-Host "Export Failed" -ForegroundColor Red
-}
-
-# ============================
-# BITDEFENDER INSTALL (DIRECT FROM SHARE)
-# ============================
-try {
-
-    Write-Host "Connecting to network share..." -ForegroundColor Cyan
-
-    New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
-
-    $installer = "ProgShare:\epskit_x64.exe"
-    $xmlfile   = "ProgShare:\installer.xml"
-
-    if (Test-Path $installer) {
-
-        Write-Host "Starting Bitdefender installation..." -ForegroundColor Yellow
-
-        Start-Process $installer `
-            -ArgumentList "-runInstaller -installerXml $xmlfile -v" `
-            -WindowStyle Hidden -Wait
-
-        Write-Host "Installation Completed ✔" -ForegroundColor Green
-
-    } else {
-        Write-Host "Installer not found on share" -ForegroundColor Red
-    }
-
-    Remove-PSDrive ProgShare -ErrorAction SilentlyContinue
-
-} catch {
-    Write-Host "Installation Failed" -ForegroundColor Red
-}
+Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "DONE ✔" -ForegroundColor Cyan
