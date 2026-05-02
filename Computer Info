@@ -22,7 +22,7 @@ Write-Host "Connecting to network share..." -ForegroundColor Cyan
 New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
 
 # ============================
-# TEMP FOLDER
+# LOCAL FOLDER
 # ============================
 $tempDir = "C:\Bitdefender"
 
@@ -53,10 +53,11 @@ $xml = "$tempDir\installer.xml"
 
 $cmd = "`"$exe`" -runInstaller -installerXml `"$xml`" -v"
 
-Start-Process "cmd.exe" `
+$process = Start-Process "cmd.exe" `
     -ArgumentList "/c $cmd" `
     -Verb RunAs `
     -WindowStyle Hidden `
+    -PassThru `
     -Wait
 
 Start-Sleep -Seconds 10
@@ -82,9 +83,7 @@ function Add-Row($Section,$Key,$Value){
     }
 }
 
-# ============================
-# GENERAL (FULL RESTORED)
-# ============================
+# GENERAL
 Add-Row "General" "Computer Name" $CompName
 Add-Row "General" "User" $env:USERNAME
 Add-Row "General" "CPU" $CPU
@@ -92,30 +91,22 @@ Add-Row "General" "OS" $OSInfo.Caption
 Add-Row "General" "Serial" $BIOS.SerialNumber
 Add-Row "General" "Scan Date" (Get-Date)
 
-# ============================
 # RAM
-# ============================
 Get-CimInstance Win32_PhysicalMemory | ForEach-Object {
     Add-Row "RAM" $_.DeviceLocator "$([math]::Round($_.Capacity/1GB,2)) GB @ $($_.Speed)MHz"
 }
 
-# ============================
 # DISKS
-# ============================
 Get-PhysicalDisk | ForEach-Object {
     Add-Row "Disks" $_.FriendlyName "$($_.MediaType) | $($_.HealthStatus) | $([math]::Round($_.Size/1GB,2)) GB"
 }
 
-# ============================
 # PARTITIONS
-# ============================
 Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
     Add-Row "Partitions" $_.DeviceID "Size: $([math]::Round($_.Size/1GB,2)) GB | Free: $([math]::Round($_.FreeSpace/1GB,2)) GB"
 }
 
-# ============================
 # NETWORK
-# ============================
 Get-NetIPConfiguration |
 Where-Object {$_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback"} |
 Sort-Object InterfaceAlias -Unique |
@@ -125,9 +116,7 @@ ForEach-Object {
     Add-Row "Network" $_.InterfaceAlias "IP: $ip | MAC: $mac"
 }
 
-# ============================
-# WIFI (optional)
-# ============================
+# WIFI
 try {
     $profiles = netsh wlan show profiles 2>$null |
         Select-String "\:(.*)$" |
@@ -144,9 +133,7 @@ try {
     }
 } catch {}
 
-# ============================
-# APPS CHECK (RESTORED)
-# ============================
+# APPS
 $Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
                          HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
                          -ErrorAction SilentlyContinue
@@ -156,20 +143,28 @@ Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"In
 Add-Row "Apps" "Output Messenger" ($(if ($Apps.DisplayName -match "Output Messenger") {"Installed"} else {"Not Found"}))
 
 # ============================
-# EXPORT CSV
+# EXPORT CSV (ONLY IF INSTALL OK)
 # ============================
-Write-Host "Exporting CSV..." -ForegroundColor Green
+if ($process.ExitCode -eq 0) {
 
-$NetworkPath = "\\192.168.1.23\info pc"
-$LocalPath = "$env:TEMP\$CompName.csv"
-$FinalPath = "$NetworkPath\$CompName.csv"
+    Write-Host "Exporting CSV..." -ForegroundColor Green
 
-$Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
-Copy-Item $LocalPath $FinalPath -Force
+    $NetworkPath = "\\192.168.1.23\info pc"
+    $LocalPath = "$env:TEMP\$CompName.csv"
+    $FinalPath = "$NetworkPath\$CompName.csv"
 
-# ============================
-# CLEANUP
-# ============================
-Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    $Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
+    Copy-Item $LocalPath $FinalPath -Force
 
-Write-Host "DONE ✔" -ForegroundColor Cyan
+    # ============================
+    # CLEANUP (LAST STEP ONLY)
+    # ============================
+    Write-Host "Cleaning files..." -ForegroundColor Cyan
+
+    Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-Host "DONE ✔" -ForegroundColor Green
+}
+else {
+    Write-Host "Installation failed - skipping export & cleanup ❌" -ForegroundColor Red
+}
