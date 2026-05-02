@@ -16,13 +16,12 @@ try {
 }
 
 # ================================
-# 1. إعدادات
+# إعدادات
 # ================================
 $ErrorActionPreference = "Stop"
 
 $CompName = $env:COMPUTERNAME
 
-# اليوزر الحقيقي
 try {
     $UserName = (Get-CimInstance Win32_ComputerSystem).UserName
     if (-not $UserName) { $UserName = "No User Logged In" }
@@ -37,7 +36,7 @@ $FinalPath = "$NetworkPath\$CompName.csv"
 Write-Host "Starting Scan..." -ForegroundColor Cyan
 
 # ================================
-# 2. System Info
+# System Info
 # ================================
 $OSInfo = Get-CimInstance Win32_OperatingSystem
 $CPU = (Get-CimInstance Win32_Processor).Name
@@ -146,35 +145,25 @@ catch {
 }
 
 # ================================
-# 3. BITDEFENDER INSTALL (Secure Login)
+# BITDEFENDER INSTALL (REPLACED WITH YOUR BAT LOGIC)
 # ================================
 try {
-    Write-Host "Connecting to network share..." -ForegroundColor Cyan
+    Write-Host "Starting Bitdefender Installation..." -ForegroundColor Cyan
 
-    # 🔐 دخول مرة واحدة فقط
-    $cred = Get-Credential
+    $installer = "\\192.168.1.23\Prog\epskit_x64.exe"
+    $xmlfile   = "\\192.168.1.23\Prog\installer.xml"
 
-    # ربط الشير
-    New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
+    if (Test-Path $installer) {
 
-    $dest = "C:\bitdefender"
+        Write-Host "Installer found. Running setup..." -ForegroundColor Yellow
 
-    if (!(Test-Path $dest)) {
-        New-Item -ItemType Directory -Path $dest | Out-Null
+        Start-Process $installer -ArgumentList "-runInstaller -installerXml `"$xmlfile`" -v" -Wait
+
+        Write-Host "Installation finished ✔" -ForegroundColor Green
     }
-
-    Write-Host "Copying files..." -ForegroundColor Yellow
-
-    Copy-Item "ProgShare:\installer.xml" "$dest\installer.xml"
-    Copy-Item "ProgShare:\epskit_x64.exe" "$dest\epskit_x64.exe"
-
-    Remove-PSDrive ProgShare
-
-    Write-Host "Starting installation..." -ForegroundColor Green
-
-    Start-Process "$dest\epskit_x64.exe" -ArgumentList "/silent /install installer.xml" -Wait
-
-    Write-Host "Installation Done ✔" -ForegroundColor Green
+    else {
+        Write-Host "ERROR: Cannot reach installer path" -ForegroundColor Red
+    }
 }
 catch {
     Write-Host "Installation Failed!" -ForegroundColor Red
