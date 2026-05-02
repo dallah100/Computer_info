@@ -1,137 +1,164 @@
 # ============================
-# PowerShell Script - PC Full Info Report (Silent + Clean Output)
+# Enable Remote Management (Silent)
 # ============================
-
 try {
-    Enable-PSRemoting -Force -ErrorAction Stop *> $null
+    $oldPref = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+
+    Enable-PSRemoting -Force *> $null
     Set-Service -Name WinRM -StartupType Automatic *> $null
     Start-Service -Name WinRM *> $null
-    New-NetFirewallRule -DisplayName "WinRM Manual" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -Profile Public *> $null
+    New-NetFirewallRule -DisplayName "WinRM Manual" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -Profile Any *> $null
+
+    $ErrorActionPreference = $oldPref
 } catch {
-    # كتم أي خطأ من التهيئة
-    $null = $_
+    $ErrorActionPreference = $oldPref
 }
 
-# Gather system info
-$ComputerName  = $env:COMPUTERNAME
-$OS            = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption
-$CPU           = Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name
-$RAM           = "{0:N2} GB" -f ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
-$SerialNumber  = (Get-CimInstance Win32_BIOS).SerialNumber
+# ================================
+# 1. إعدادات
+# ================================
+$ErrorActionPreference = "Stop"
 
-# Get current logged-in user
-$LoggedInUser = (Get-WmiObject -Class Win32_ComputerSystem).UserName
-if (-not $LoggedInUser) {
-    $LoggedInUser = "No user logged in"
+$CompName = $env:COMPUTERNAME
+$UserName = $env:USERNAME
+
+$NetworkPath = "\\192.168.1.23\info pc"
+$LocalPath = "$env:TEMP\$CompName.xlsx"
+$FinalPath = "$NetworkPath\$CompName.xlsx"
+
+Write-Host "Starting Scan..." -ForegroundColor Cyan
+
+# ================================
+# 2. System Info
+# ================================
+$OSInfo = Get-CimInstance Win32_OperatingSystem
+$CPU = (Get-CimInstance Win32_Processor).Name
+$BIOS = Get-CimInstance Win32_BIOS
+
+$Report = @()
+
+function Add-Row($Section,$Key,$Value){
+    $script:Report += [PSCustomObject]@{
+        Section = $Section
+        Item    = $Key
+        Value   = $Value
+    }
 }
 
-# Check installed apps
-$InstalledApps = Get-ItemProperty HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*,
-                                  HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
-                  Select-Object DisplayName
+# ================================
+# GENERAL
+# ================================
+Add-Row "General" "Computer Name" $CompName
+Add-Row "General" "User" $UserName
+Add-Row "General" "CPU" $CPU
+Add-Row "General" "OS" $OSInfo.Caption
+Add-Row "General" "Serial" $BIOS.SerialNumber
+Add-Row "General" "Scan Date" (Get-Date)
 
-function Check-App($name) {
-    if ($InstalledApps.DisplayName -match $name) { return "Installed" } else { return "Not Installed" }
+# ================================
+# RAM
+# ================================
+Get-CimInstance Win32_PhysicalMemory | ForEach-Object {
+    Add-Row "RAM" $_.DeviceLocator "$([math]::Round($_.Capacity/1GB,2)) GB @ $($_.Speed)MHz"
 }
 
-$VNC             = Check-App "VNC Server"
-$OutputMessenger = Check-App "Output Messenger"
-$Bitdefender     = Check-App "Bitdefender"
+# ================================
+# DISKS
+# ================================
+Get-PhysicalDisk | ForEach-Object {
+    Add-Row "Disks" $_.FriendlyName "$($_.MediaType) | $($_.HealthStatus) | $([math]::Round($_.Size/1GB,2)) GB"
+}
 
-# Get all physical disks and networks
-$Disks   = Get-PhysicalDisk
-$Networks = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
+# ================================
+# PARTITIONS
+# ================================
+Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
+    Add-Row "Partitions" $_.DeviceID "Size: $([math]::Round($_.Size/1GB,2)) GB | Free: $([math]::Round($_.FreeSpace/1GB,2)) GB"
+}
 
-# Output array
-$Output = @()
-$first = $true
+# ================================
+# NETWORK (NO DUPLICATES)
+# ================================
+Get-NetIPConfiguration |
+Where-Object {$_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback"} |
+Sort-Object InterfaceAlias -Unique |
+ForEach-Object {
 
-# Disk info section
-foreach ($disk in $Disks) {
-    $common = if ($first) {
-        @{
-            ComputerName     = $ComputerName
-            LoggedInUser     = $LoggedInUser
-            OS               = $OS
-            CPU              = $CPU
-            RAM              = $RAM
-            SerialNumber     = $SerialNumber
-            VNC_Server       = $VNC
-            Output_Messenger = $OutputMessenger
-            Bitdefender      = $Bitdefender
+    $ip = ($_.IPv4Address | Select-Object -First 1).IPAddress
+    $mac = (Get-NetAdapter -Name $_.InterfaceAlias).MacAddress
+
+    Add-Row "Network" $_.InterfaceAlias "IP: $ip | MAC: $mac"
+}
+
+# ================================
+# WIFI
+# ================================
+try {
+    $profiles = netsh wlan show profiles 2>$null |
+        Select-String "\:(.*)$" |
+        ForEach-Object { $_.Matches.Groups[1].Value.Trim() } |
+        Sort-Object -Unique
+
+    foreach ($p in $profiles) {
+
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
+
+        $pass = netsh wlan show profile name="$p" key=clear 2>$null |
+            Select-String "Key Content\W+\:(.*)$" |
+            ForEach-Object { $_.Matches.Groups[1].Value.Trim() }
+
+        if ($pass) {
+            Add-Row "WiFi" $p $pass
         }
-    } else {
-        @{
-            ComputerName     = "-"
-            LoggedInUser     = "-"
-            OS               = "-"
-            CPU              = "-"
-            RAM              = "-"
-            SerialNumber     = "-"
-            VNC_Server       = "-"
-            Output_Messenger = "-"
-            Bitdefender      = "-"
-        }
-    }
-
-    $first = $false
-
-    # الحصول على حجم القرص فقط
-    $DiskSize = "{0:N2} GB" -f ($disk.Size / 1GB)
-
-    $Output += [PSCustomObject]@{
-        ComputerName       = $common.ComputerName
-        LoggedInUser       = $common.LoggedInUser
-        OS                 = $common.OS
-        CPU                = $common.CPU
-        RAM                = $common.RAM
-        SerialNumber       = $common.SerialNumber
-        NetworkName        = "-"
-        MACAddress         = "-"
-        IPAddress          = "-"
-        ConnectionType     = "-"
-        DiskFriendlyName   = $disk.FriendlyName
-        DiskBusType        = $disk.BusType
-        DiskMediaType      = $disk.MediaType
-        DiskSize           = $DiskSize  # فقط عرض الحجم الكلي للقرص
-        VNC_Server         = $common.VNC_Server
-        Output_Messenger   = $common.Output_Messenger
-        Bitdefender        = $common.Bitdefender
     }
 }
+catch {}
 
-# Network info section
-foreach ($net in $Networks) {
-    $adapter = Get-NetAdapter | Where-Object { $_.MacAddress -replace '-', ':' -eq ($net.MACAddress -replace '-', ':') }
-    $ConnectionType = switch ($adapter.InterfaceType) {
-        6     { "Ethernet" }
-        71    { "Wi-Fi" }
-        default { "Other" }
-    }
-
-    $Output += [PSCustomObject]@{
-        ComputerName       = "-"
-        LoggedInUser       = "-"
-        OS                 = "-"
-        CPU                = "-"
-        RAM                = "-"
-        SerialNumber       = "-"
-        NetworkName        = $net.Description
-        MACAddress         = $net.MACAddress
-        IPAddress          = $net.IPAddress[0]
-        ConnectionType     = $ConnectionType
-        DiskFriendlyName   = "-"
-        DiskBusType        = "-"
-        DiskMediaType      = "-"
-        DiskSize           = "-"  # لا يوجد حجم قرص للشبكة
-        VNC_Server         = "-"
-        Output_Messenger   = "-"
-        Bitdefender        = "-"
-    }
+# ================================
+# PRINTERS
+# ================================
+Get-Printer | ForEach-Object {
+    Add-Row "Printers" $_.Name "Installed"
 }
 
-# Export to CSV silently
-$CSVPath = "C:\PC_Full_Info.csv"
-$Output | Export-Csv -Path $CSVPath -NoTypeInformation -Encoding UTF8 *> $null
+# ================================
+# APPS CHECK
+# ================================
+$Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
+                         HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
+                         -ErrorAction SilentlyContinue
 
-Write-Output "✅ Done"
+Add-Row "Apps" "VNC" ($(if ($Apps.DisplayName -match "VNC") {"Installed"} else {"Not Found"}))
+Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"Installed"} else {"Not Found"}))
+Add-Row "Apps" "Output Messenger" ($(if ($Apps.DisplayName -match "Output Messenger") {"Installed"} else {"Not Found"}))
+
+# ================================
+# EXPORT (Excel Single Sheet)
+# ================================
+try {
+
+    if (!(Get-Module -ListAvailable ImportExcel)) {
+        Install-Module ImportExcel -Scope CurrentUser -Force
+    }
+
+    Import-Module ImportExcel
+
+    Write-Host "Exporting Single Sheet..." -ForegroundColor Green
+
+    $Report | Export-Excel -Path $LocalPath -WorksheetName "Full Report" `
+        -AutoSize -BoldTopRow -AutoFilter -FreezeTopRow
+
+    Copy-Item $LocalPath $FinalPath -Force
+
+    Write-Host "DONE ✔" -ForegroundColor Green
+}
+catch {
+    Write-Host "Export Failed!" -ForegroundColor Red
+    Write-Host $_
+}
+
+# ================================
+# END
+# ================================
+Read-Host "Press Enter to exit"
