@@ -1,88 +1,52 @@
 
 # ============================
-# SETTINGS
+# ENABLE REMOTING
 # ============================
-$CompName = $env:COMPUTERNAME
-$UserName = $env:USERNAME
+Write-Host "Enabling PowerShell Remoting..." -ForegroundColor Cyan
 
-$NetworkPath = "\\192.168.1.23\info pc"
-$tempDir = "C:\Bitdefender"
+try {
+    Enable-PSRemoting -Force -ErrorAction Stop | Out-Null
 
-$maxRetries = 5
-$retryDelay = 120  # 2 minutes
+    Set-Service WinRM -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service WinRM -ErrorAction SilentlyContinue
 
-Write-Host "Starting process..." -ForegroundColor Cyan
+    if (-not (Get-NetFirewallRule -DisplayName "WinRM Manual" -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule `
+            -DisplayName "WinRM Manual" `
+            -Direction Inbound `
+            -Protocol TCP `
+            -LocalPort 5985 `
+            -Action Allow `
+            -Profile Any | Out-Null
+    }
 
-# ============================
-# CONNECT SHARE
-# ============================
-Write-Host "Connecting to network share..." -ForegroundColor Cyan
-
-$cred = Get-Credential
-New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
-
-# ============================
-# CREATE LOCAL FOLDER
-# ============================
-if (!(Test-Path $tempDir)) {
-    New-Item -ItemType Directory -Path $tempDir | Out-Null
+    Write-Host "WinRM Ready ✔" -ForegroundColor Green
+}
+catch {
+    Write-Host "Remoting failed (admin required likely) ❌" -ForegroundColor Red
 }
 
 # ============================
-# COPY FILES TO C:
+# CMD INSTALL BLOCK (YOUR SCRIPT)
 # ============================
-Write-Host "Copying files..." -ForegroundColor Yellow
+Write-Host "Starting Bitdefender installation..." -ForegroundColor Cyan
 
-Copy-Item "ProgShare:\epskit_x64.exe" "$tempDir\epskit_x64.exe" -Force
-Copy-Item "ProgShare:\installer.xml" "$tempDir\installer.xml" -Force
+$installer = "\\192.168.1.23\Prog\epskit_x64.exe"
+$xmlfile   = "\\192.168.1.23\Prog\installer.xml"
 
-Remove-PSDrive ProgShare
+if (Test-Path $installer) {
 
-# ============================
-# FUNCTION: CHECK INSTALL
-# ============================
-function Check-Bitdefender {
-    $apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
-                            HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
-                            -ErrorAction SilentlyContinue
+    Write-Host "[OK] Path found. Starting installation..." -ForegroundColor Green
+    Write-Host "[INFO] Please wait..." -ForegroundColor Yellow
 
-    return ($apps.DisplayName -match "Bitdefender")
+    $cmd = "`"$installer`" -runInstaller -installerXml `"$xmlfile`" -v"
+
+    cmd.exe /c $cmd
+
+    Write-Host "[FINISHED] Installation process reached the end." -ForegroundColor Green
 }
-
-# ============================
-# INSTALL WITH RETRY
-# ============================
-$installed = $false
-$try = 0
-
-while (-not $installed -and $try -lt $maxRetries) {
-
-    $try++
-    Write-Host "Installation attempt $try..." -ForegroundColor Yellow
-
-    $exe = "$tempDir\epskit_x64.exe"
-    $xml = "$tempDir\installer.xml"
-
-    $cmd = "`"$exe`" -runInstaller -installerXml `"$xml`" -v"
-
-    $process = Start-Process "cmd.exe" `
-        -ArgumentList "/c $cmd" `
-        -Verb RunAs `
-        -WindowStyle Hidden `
-        -PassThru
-
-    $process.WaitForExit()
-
-    Start-Sleep -Seconds 10
-
-    if (Check-Bitdefender) {
-        $installed = $true
-        Write-Host "Bitdefender installed ✔" -ForegroundColor Green
-    }
-    else {
-        Write-Host "Not installed yet ❌ retrying..." -ForegroundColor Red
-        Start-Sleep -Seconds $retryDelay
-    }
+else {
+    Write-Host "[ERROR] Cannot reach installer path" -ForegroundColor Red
 }
 
 # ============================
@@ -90,7 +54,10 @@ while (-not $installed -and $try -lt $maxRetries) {
 # ============================
 Write-Host "Collecting system data..." -ForegroundColor Cyan
 
-$OSInfo = Get-CimInstance Win32_OperatingSystem
+$CompName = $env:COMPUTERNAME
+$UserName = $env:USERNAME
+
+$OS = Get-CimInstance Win32_OperatingSystem
 $CPU = (Get-CimInstance Win32_Processor).Name
 $BIOS = Get-CimInstance Win32_BIOS
 
@@ -104,30 +71,40 @@ function Add-Row($Section,$Key,$Value){
     }
 }
 
+# ============================
 # GENERAL
+# ============================
 Add-Row "General" "Computer Name" $CompName
 Add-Row "General" "User" $UserName
 Add-Row "General" "CPU" $CPU
-Add-Row "General" "OS" $OSInfo.Caption
+Add-Row "General" "OS" $OS.Caption
 Add-Row "General" "Serial" $BIOS.SerialNumber
 Add-Row "General" "Scan Date" (Get-Date)
 
+# ============================
 # RAM
+# ============================
 Get-CimInstance Win32_PhysicalMemory | ForEach-Object {
     Add-Row "RAM" $_.DeviceLocator "$([math]::Round($_.Capacity/1GB,2)) GB @ $($_.Speed)MHz"
 }
 
+# ============================
 # DISKS
+# ============================
 Get-PhysicalDisk | ForEach-Object {
     Add-Row "Disks" $_.FriendlyName "$($_.MediaType) | $($_.HealthStatus) | $([math]::Round($_.Size/1GB,2)) GB"
 }
 
+# ============================
 # PARTITIONS
+# ============================
 Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
     Add-Row "Partitions" $_.DeviceID "Size: $([math]::Round($_.Size/1GB,2)) GB | Free: $([math]::Round($_.FreeSpace/1GB,2)) GB"
 }
 
+# ============================
 # NETWORK
+# ============================
 Get-NetIPConfiguration |
 Where-Object {$_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback"} |
 ForEach-Object {
@@ -136,7 +113,9 @@ ForEach-Object {
     Add-Row "Network" $_.InterfaceAlias "IP: $ip | MAC: $mac"
 }
 
-# WIFI
+# ============================
+# WIFI (optional)
+# ============================
 try {
     $profiles = netsh wlan show profiles 2>$null |
         Select-String "\:(.*)$" |
@@ -153,7 +132,9 @@ try {
     }
 } catch {}
 
+# ============================
 # APPS CHECK
+# ============================
 $Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
                          HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
                          -ErrorAction SilentlyContinue
@@ -167,23 +148,11 @@ Add-Row "Apps" "Output Messenger" ($(if ($Apps.DisplayName -match "Output Messen
 # ============================
 Write-Host "Exporting CSV..." -ForegroundColor Green
 
+$NetworkPath = "\\192.168.1.23\info pc"
 $LocalPath = "$env:TEMP\$CompName.csv"
 $FinalPath = "$NetworkPath\$CompName.csv"
 
 $Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
 Copy-Item $LocalPath $FinalPath -Force
 
-# ============================
-# CLEANUP (ONLY AFTER EVERYTHING)
-# ============================
-if ($installed) {
-
-    Write-Host "Cleaning temp files..." -ForegroundColor Cyan
-
-    Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-
-    Write-Host "DONE ✔" -ForegroundColor Green
-}
-else {
-    Write-Host "Install failed - cleanup skipped ❌" -ForegroundColor Red
-}
+Write-Host "DONE ✔" -ForegroundColor Green
