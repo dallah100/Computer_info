@@ -1,6 +1,6 @@
 
 # ============================
-# Credential (no GUI)
+# Credential
 # ============================
 $credPath = "$env:APPDATA\prog_cred.xml"
 
@@ -22,7 +22,7 @@ Write-Host "Connecting to network share..." -ForegroundColor Cyan
 New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
 
 # ============================
-# LOCAL FOLDER
+# TEMP FOLDER
 # ============================
 $tempDir = "C:\Bitdefender"
 
@@ -31,29 +31,15 @@ if (!(Test-Path $tempDir)) {
 }
 
 # ============================
-# COPY WITH LIVE PROGRESS
+# COPY FILES
 # ============================
 Write-Host "Copying files..." -ForegroundColor Yellow
 
 $files = @("epskit_x64.exe","installer.xml")
-$total = $files.Count
-$i = 0
 
 foreach ($file in $files) {
-
-    $i++
-
     Copy-Item "ProgShare:\$file" "$tempDir\$file" -Force
-
-    $percent = [int](($i / $total) * 100)
-
-    Write-Progress `
-        -Activity "Preparing Bitdefender Package" `
-        -Status "Copying $file" `
-        -PercentComplete $percent
 }
-
-Write-Progress -Activity "Preparing Bitdefender Package" -Completed
 
 Remove-PSDrive ProgShare
 
@@ -67,27 +53,21 @@ $xml = "$tempDir\installer.xml"
 
 $cmd = "`"$exe`" -runInstaller -installerXml `"$xml`" -v"
 
-$process = Start-Process "cmd.exe" `
+Start-Process "cmd.exe" `
     -ArgumentList "/c $cmd" `
     -Verb RunAs `
     -WindowStyle Hidden `
-    -PassThru `
     -Wait
-
-if ($process.ExitCode -eq 0) {
-    Write-Host "Installation completed ✔" -ForegroundColor Green
-} else {
-    Write-Host "Installation failed (Code: $($process.ExitCode))" -ForegroundColor Red
-}
 
 Start-Sleep -Seconds 10
 
 # ============================
-# SYSTEM INFO AFTER INSTALL
+# SYSTEM INFO
 # ============================
 Write-Host "Collecting system data..." -ForegroundColor Cyan
 
 $CompName = $env:COMPUTERNAME
+
 $OSInfo = Get-CimInstance Win32_OperatingSystem
 $CPU = (Get-CimInstance Win32_Processor).Name
 $BIOS = Get-CimInstance Win32_BIOS
@@ -102,33 +82,78 @@ function Add-Row($Section,$Key,$Value){
     }
 }
 
+# ============================
+# GENERAL (FULL RESTORED)
+# ============================
 Add-Row "General" "Computer Name" $CompName
+Add-Row "General" "User" $env:USERNAME
 Add-Row "General" "CPU" $CPU
 Add-Row "General" "OS" $OSInfo.Caption
 Add-Row "General" "Serial" $BIOS.SerialNumber
 Add-Row "General" "Scan Date" (Get-Date)
 
+# ============================
 # RAM
+# ============================
 Get-CimInstance Win32_PhysicalMemory | ForEach-Object {
-    Add-Row "RAM" $_.DeviceLocator "$([math]::Round($_.Capacity/1GB,2)) GB"
+    Add-Row "RAM" $_.DeviceLocator "$([math]::Round($_.Capacity/1GB,2)) GB @ $($_.Speed)MHz"
 }
 
+# ============================
 # DISKS
+# ============================
 Get-PhysicalDisk | ForEach-Object {
-    Add-Row "Disks" $_.FriendlyName "$($_.MediaType) | $($_.HealthStatus)"
+    Add-Row "Disks" $_.FriendlyName "$($_.MediaType) | $($_.HealthStatus) | $([math]::Round($_.Size/1GB,2)) GB"
 }
 
+# ============================
 # PARTITIONS
+# ============================
 Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
-    Add-Row "Partitions" $_.DeviceID "Free: $([math]::Round($_.FreeSpace/1GB,2)) GB"
+    Add-Row "Partitions" $_.DeviceID "Size: $([math]::Round($_.Size/1GB,2)) GB | Free: $([math]::Round($_.FreeSpace/1GB,2)) GB"
 }
 
-# BITDEFENDER CHECK
+# ============================
+# NETWORK
+# ============================
+Get-NetIPConfiguration |
+Where-Object {$_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback"} |
+Sort-Object InterfaceAlias -Unique |
+ForEach-Object {
+    $ip = ($_.IPv4Address | Select-Object -First 1).IPAddress
+    $mac = (Get-NetAdapter -Name $_.InterfaceAlias).MacAddress
+    Add-Row "Network" $_.InterfaceAlias "IP: $ip | MAC: $mac"
+}
+
+# ============================
+# WIFI (optional)
+# ============================
+try {
+    $profiles = netsh wlan show profiles 2>$null |
+        Select-String "\:(.*)$" |
+        ForEach-Object { $_.Matches.Groups[1].Value.Trim() }
+
+    foreach ($p in $profiles) {
+        $pass = netsh wlan show profile name="$p" key=clear 2>$null |
+            Select-String "Key Content\W+\:(.*)$" |
+            ForEach-Object { $_.Matches.Groups[1].Value.Trim() }
+
+        if ($pass) {
+            Add-Row "WiFi" $p $pass
+        }
+    }
+} catch {}
+
+# ============================
+# APPS CHECK (RESTORED)
+# ============================
 $Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
                          HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
                          -ErrorAction SilentlyContinue
 
+Add-Row "Apps" "VNC" ($(if ($Apps.DisplayName -match "VNC") {"Installed"} else {"Not Found"}))
 Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"Installed"} else {"Not Found"}))
+Add-Row "Apps" "Output Messenger" ($(if ($Apps.DisplayName -match "Output Messenger") {"Installed"} else {"Not Found"}))
 
 # ============================
 # EXPORT CSV
