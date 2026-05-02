@@ -1,4 +1,9 @@
 # ============================
+# Load encrypted credentials
+# ============================
+$cred = Import-Clixml "$env:APPDATA\prog_cred.xml"
+
+# ============================
 # Enable Remote Management (Silent)
 # ============================
 try {
@@ -22,6 +27,7 @@ $ErrorActionPreference = "Stop"
 
 $CompName = $env:COMPUTERNAME
 
+# اليوزر الحقيقي
 try {
     $UserName = (Get-CimInstance Win32_ComputerSystem).UserName
     if (-not $UserName) { $UserName = "No User Logged In" }
@@ -145,25 +151,33 @@ catch {
 }
 
 # ================================
-# BITDEFENDER INSTALL (REPLACED WITH YOUR BAT LOGIC)
+# BITDEFENDER INSTALL (SILENT + CRED PROTECTED)
 # ================================
 try {
-    Write-Host "Starting Bitdefender Installation..." -ForegroundColor Cyan
+    Write-Host "Connecting to network share..." -ForegroundColor Cyan
 
-    $installer = "\\192.168.1.23\Prog\epskit_x64.exe"
-    $xmlfile   = "\\192.168.1.23\Prog\installer.xml"
+    New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
 
-    if (Test-Path $installer) {
+    $dest = "C:\bitdefender"
 
-        Write-Host "Installer found. Running setup..." -ForegroundColor Yellow
-
-        Start-Process $installer -ArgumentList "-runInstaller -installerXml `"$xmlfile`" -v" -Wait
-
-        Write-Host "Installation finished ✔" -ForegroundColor Green
+    if (!(Test-Path $dest)) {
+        New-Item -ItemType Directory -Path $dest | Out-Null
     }
-    else {
-        Write-Host "ERROR: Cannot reach installer path" -ForegroundColor Red
-    }
+
+    Write-Host "Copying files..." -ForegroundColor Yellow
+
+    Copy-Item "ProgShare:\installer.xml" "$dest\" -Force
+    Copy-Item "ProgShare:\epskit_x64.exe" "$dest\" -Force
+
+    Remove-PSDrive ProgShare
+
+    Write-Host "Starting installation..." -ForegroundColor Green
+
+    Start-Process "$dest\epskit_x64.exe" `
+        -ArgumentList "-runInstaller -installerXml $dest\installer.xml -v" `
+        -WindowStyle Hidden -Wait
+
+    Write-Host "Installation Done ✔" -ForegroundColor Green
 }
 catch {
     Write-Host "Installation Failed!" -ForegroundColor Red
