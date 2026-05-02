@@ -1,21 +1,77 @@
+# ============================
+# SELF-RELAUNCH AS ADMIN + BYPASS
+# ============================
+$isAdmin = ([Security.Principal.WindowsPrincipal] `
+    [Security.Principal.WindowsIdentity]::GetCurrent() `
+    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
+$isBypass = ($env:EXECUTION_BYPASS -eq "1")
 
-Write-Host "Configuring WinRM safely..." -ForegroundColor Cyan
+if (-not $isAdmin -or -not $isBypass) {
+    Write-Host "Relaunching with Admin rights and Bypass policy..." -ForegroundColor Yellow
+
+    $env:EXECUTION_BYPASS = "1"
+
+    Start-Process powershell.exe -Verb RunAs -ArgumentList `
+        "-ExecutionPolicy Bypass -NonInteractive -File `"$PSCommandPath`""
+
+    exit
+}
+
+# ============================
+# SET EXECUTION POLICY PERMANENTLY
+# ============================
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
+
+# ============================
+# SETTINGS
+# ============================
+$CompName    = $env:COMPUTERNAME
+$UserName    = $env:USERNAME
+$NetworkPath = "\\192.168.1.23\info pc"
+$LogDir      = "$NetworkPath\logs"
+$LogPath     = "$LogDir\$CompName.log"
+$installer   = "\\192.168.1.23\Prog\epskit_x64.exe"
+$xmlfile     = "\\192.168.1.23\Prog\installer.xml"
+
+# ============================
+# LOGGING FUNCTION
+# ============================
+function Write-Log($msg, $color = "White") {
+    $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | $msg"
+    try { Add-Content $LogPath $line -ErrorAction SilentlyContinue } catch {}
+    Write-Host $line -ForegroundColor $color
+}
+
+# ============================
+# NETWORK SHARE CHECK
+# ============================
+Write-Host "Checking network share..." -ForegroundColor Cyan
+
+if (-not (Test-Path $NetworkPath)) {
+    Write-Host "ERROR: Cannot reach network share: $NetworkPath" -ForegroundColor Red
+    exit 1
+}
+
+# Create log dir if missing
+if (!(Test-Path $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir | Out-Null
+}
+
+Write-Log "===== START: $CompName =====" "Cyan"
+Write-Log "Network share OK" "Green"
+
+# ============================
+# WINRM CONFIGURATION
+# ============================
+Write-Log "Configuring WinRM..." "Cyan"
 
 try {
-    # Force stop service first (avoid hanging)
     Stop-Service WinRM -Force -ErrorAction SilentlyContinue
-
-    # Set automatic start
     Set-Service WinRM -StartupType Automatic
-
-    # Start again clean
     Start-Service WinRM
-
-    # Ensure listener exists (safe alternative to Enable-PSRemoting)
     winrm quickconfig -q | Out-Null
 
-    # Firewall rule (only if missing)
     if (-not (Get-NetFirewallRule -DisplayName "WinRM Manual" -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule `
             -DisplayName "WinRM Manual" `
@@ -23,54 +79,50 @@ try {
             -Protocol TCP `
             -LocalPort 5985 `
             -Action Allow `
-            -Profile Any | Out-Null
+            -Profile Domain, Private | Out-Null
+        Write-Log "Firewall rule created" "Green"
+    } else {
+        Write-Log "Firewall rule already exists" "Yellow"
     }
 
-    Write-Host "WinRM Ready ✔" -ForegroundColor Green
+    Write-Log "WinRM Ready" "Green"
 }
 catch {
-    Write-Host "WinRM setup failed ❌" -ForegroundColor Red
+    Write-Log "WinRM setup failed: $_" "Red"
 }
 
-
 # ============================
-# CMD INSTALL BLOCK (YOUR SCRIPT)
+# BITDEFENDER INSTALLATION
 # ============================
-Write-Host "Starting Bitdefender installation..." -ForegroundColor Cyan
-
-$installer = "\\192.168.1.23\Prog\epskit_x64.exe"
-$xmlfile   = "\\192.168.1.23\Prog\installer.xml"
+Write-Log "Starting Bitdefender installation..." "Cyan"
 
 if (Test-Path $installer) {
 
-    Write-Host "[OK] Path found. Starting installation..." -ForegroundColor Green
-    Write-Host "[INFO] Please wait..." -ForegroundColor Yellow
+    Write-Log "Installer path found. Running..." "Green"
 
     $cmd = "`"$installer`" -runInstaller -installerXml `"$xmlfile`" -v"
+    $process = Start-Process "cmd.exe" -ArgumentList "/c $cmd" -PassThru
 
-    cmd.exe /c $cmd
+    Write-Log "Waiting for installer to finish..." "Yellow"
+    $process.WaitForExit()
+    Write-Log "Installer process finished (ExitCode: $($process.ExitCode))" "Green"
 
-    Write-Host "[FINISHED] Installation process reached the end." -ForegroundColor Green
-}
-else {
-    Write-Host "[ERROR] Cannot reach installer path" -ForegroundColor Red
+} else {
+    Write-Log "ERROR: Cannot reach installer path: $installer" "Red"
 }
 
 # ============================
 # SYSTEM INFO COLLECTION
 # ============================
-Write-Host "Collecting system data..." -ForegroundColor Cyan
+Write-Log "Collecting system data..." "Cyan"
 
-$CompName = $env:COMPUTERNAME
-$UserName = $env:USERNAME
-
-$OS = Get-CimInstance Win32_OperatingSystem
-$CPU = (Get-CimInstance Win32_Processor).Name
+$OS   = Get-CimInstance Win32_OperatingSystem
+$CPU  = (Get-CimInstance Win32_Processor).Name
 $BIOS = Get-CimInstance Win32_BIOS
 
 $Report = @()
 
-function Add-Row($Section,$Key,$Value){
+function Add-Row($Section, $Key, $Value) {
     $script:Report += [PSCustomObject]@{
         Section = $Section
         Item    = $Key
@@ -82,11 +134,11 @@ function Add-Row($Section,$Key,$Value){
 # GENERAL
 # ============================
 Add-Row "General" "Computer Name" $CompName
-Add-Row "General" "User" $UserName
-Add-Row "General" "CPU" $CPU
-Add-Row "General" "OS" $OS.Caption
-Add-Row "General" "Serial" $BIOS.SerialNumber
-Add-Row "General" "Scan Date" (Get-Date)
+Add-Row "General" "User"          $UserName
+Add-Row "General" "CPU"           $CPU
+Add-Row "General" "OS"            $OS.Caption
+Add-Row "General" "Serial"        $BIOS.SerialNumber
+Add-Row "General" "Scan Date"     (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 
 # ============================
 # RAM
@@ -113,15 +165,15 @@ Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
 # NETWORK
 # ============================
 Get-NetIPConfiguration |
-Where-Object {$_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback"} |
+Where-Object { $_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback" } |
 ForEach-Object {
-    $ip = ($_.IPv4Address | Select-Object -First 1).IPAddress
+    $ip  = ($_.IPv4Address | Select-Object -First 1).IPAddress
     $mac = (Get-NetAdapter -Name $_.InterfaceAlias).MacAddress
     Add-Row "Network" $_.InterfaceAlias "IP: $ip | MAC: $mac"
 }
 
 # ============================
-# WIFI (optional)
+# WIFI
 # ============================
 try {
     $profiles = netsh wlan show profiles 2>$null |
@@ -134,32 +186,54 @@ try {
             ForEach-Object { $_.Matches.Groups[1].Value.Trim() }
 
         if ($pass) {
-            Add-Row "WiFi" $p $pass
+            # Mask password in CSV - store only length hint for security
+            $masked = ("*" * $pass.Length)
+            Add-Row "WiFi" $p $masked
         }
     }
-} catch {}
+} catch {
+    Write-Log "WiFi collection skipped: $_" "Yellow"
+}
 
 # ============================
-# APPS CHECK
+# APPS CHECK + BD VERSION
 # ============================
-$Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
-                         HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
-                         -ErrorAction SilentlyContinue
+$Apps = Get-ItemProperty `
+    HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
+    HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
+    -ErrorAction SilentlyContinue
 
-Add-Row "Apps" "VNC" ($(if ($Apps.DisplayName -match "VNC") {"Installed"} else {"Not Found"}))
-Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"Installed"} else {"Not Found"}))
+$bdInstalled = $Apps.DisplayName -match "Bitdefender"
+$bdVersion   = ($Apps | Where-Object { $_.DisplayName -match "Bitdefender" } |
+                Select-Object -First 1).DisplayVersion
+
+Add-Row "Apps" "VNC"              ($(if ($Apps.DisplayName -match "VNC") {"Installed"} else {"Not Found"}))
+Add-Row "Apps" "Bitdefender"      ($(if ($bdInstalled) {"Installed"} else {"Not Found"}))
+Add-Row "Apps" "Bitdefender Ver"  ($(if ($bdVersion) {$bdVersion} else {"N/A"}))
 Add-Row "Apps" "Output Messenger" ($(if ($Apps.DisplayName -match "Output Messenger") {"Installed"} else {"Not Found"}))
 
-# ============================
-# EXPORT CSV
-# ============================
-Write-Host "Exporting CSV..." -ForegroundColor Green
+if ($bdInstalled) {
+    Write-Log "Bitdefender detected - Version: $bdVersion" "Green"
+} else {
+    Write-Log "Bitdefender NOT detected after installation!" "Red"
+}
 
-$NetworkPath = "\\192.168.1.23\info pc"
-$LocalPath = "$env:TEMP\$CompName.csv"
-$FinalPath = "$NetworkPath\$CompName.csv"
+# ============================
+# EXPORT CSV (with timestamp)
+# ============================
+Write-Log "Exporting CSV..." "Green"
+
+$timestamp  = Get-Date -Format "yyyyMMdd_HHmmss"
+$LocalPath  = "$env:TEMP\$CompName`_$timestamp.csv"
+$FinalPath  = "$NetworkPath\$CompName`_$timestamp.csv"
 
 $Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
-Copy-Item $LocalPath $FinalPath -Force
 
-Write-Host "DONE ✔" -ForegroundColor Green
+if (Test-Path $NetworkPath) {
+    Copy-Item $LocalPath $FinalPath -Force
+    Write-Log "CSV saved: $FinalPath" "Green"
+} else {
+    Write-Log "ERROR: Could not copy CSV to network - saved locally at $LocalPath" "Red"
+}
+
+Write-Log "===== DONE: $CompName =====" "Cyan"
