@@ -1,55 +1,38 @@
+
 # ============================
-# Load or create encrypted credentials
+# Load or Create Credential (Console Only)
 # ============================
 $credPath = "$env:APPDATA\prog_cred.xml"
 
 if (Test-Path $credPath) {
+
     $cred = Import-Clixml $credPath
+
 } else {
-    $cred = Get-Credential
+
+    Write-Host "First run - enter network credentials:" -ForegroundColor Yellow
+
+    $username = Read-Host "Username"
+    $password = Read-Host "Password" -AsSecureString
+
+    $cred = New-Object System.Management.Automation.PSCredential ($username, $password)
+
     $cred | Export-Clixml $credPath
 }
 
 # ============================
-# Enable Remote Management (Silent)
+# Settings
 # ============================
-try {
-    $oldPref = $ErrorActionPreference
-    $ErrorActionPreference = "SilentlyContinue"
-
-    Enable-PSRemoting -Force *> $null
-    Set-Service -Name WinRM -StartupType Automatic *> $null
-    Start-Service -Name WinRM *> $null
-    New-NetFirewallRule -DisplayName "WinRM Manual" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow -Profile Any *> $null
-
-    $ErrorActionPreference = $oldPref
-} catch {
-    $ErrorActionPreference = $oldPref
-}
-
-# ================================
-# إعدادات
-# ================================
-$ErrorActionPreference = "Stop"
-
 $CompName = $env:COMPUTERNAME
-
-try {
-    $UserName = (Get-CimInstance Win32_ComputerSystem).UserName
-    if (-not $UserName) { $UserName = "No User Logged In" }
-} catch {
-    $UserName = "Unknown"
-}
-
 $NetworkPath = "\\192.168.1.23\info pc"
 $LocalPath = "$env:TEMP\$CompName.csv"
 $FinalPath = "$NetworkPath\$CompName.csv"
 
 Write-Host "Starting Scan..." -ForegroundColor Cyan
 
-# ================================
+# ============================
 # System Info
-# ================================
+# ============================
 $OSInfo = Get-CimInstance Win32_OperatingSystem
 $CPU = (Get-CimInstance Win32_Processor).Name
 $BIOS = Get-CimInstance Win32_BIOS
@@ -64,9 +47,16 @@ function Add-Row($Section,$Key,$Value){
     }
 }
 
-# ================================
+# ============================
 # GENERAL
-# ================================
+# ============================
+try {
+    $UserName = (Get-CimInstance Win32_ComputerSystem).UserName
+    if (-not $UserName) { $UserName = "No User Logged In" }
+} catch {
+    $UserName = "Unknown"
+}
+
 Add-Row "General" "Computer Name" $CompName
 Add-Row "General" "User" $UserName
 Add-Row "General" "CPU" $CPU
@@ -74,53 +64,48 @@ Add-Row "General" "OS" $OSInfo.Caption
 Add-Row "General" "Serial" $BIOS.SerialNumber
 Add-Row "General" "Scan Date" (Get-Date)
 
-# ================================
+# ============================
 # RAM
-# ================================
+# ============================
 Get-CimInstance Win32_PhysicalMemory | ForEach-Object {
     Add-Row "RAM" $_.DeviceLocator "$([math]::Round($_.Capacity/1GB,2)) GB @ $($_.Speed)MHz"
 }
 
-# ================================
+# ============================
 # DISKS
-# ================================
+# ============================
 Get-PhysicalDisk | ForEach-Object {
     Add-Row "Disks" $_.FriendlyName "$($_.MediaType) | $($_.HealthStatus) | $([math]::Round($_.Size/1GB,2)) GB"
 }
 
-# ================================
+# ============================
 # PARTITIONS
-# ================================
+# ============================
 Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
     Add-Row "Partitions" $_.DeviceID "Size: $([math]::Round($_.Size/1GB,2)) GB | Free: $([math]::Round($_.FreeSpace/1GB,2)) GB"
 }
 
-# ================================
+# ============================
 # NETWORK
-# ================================
+# ============================
 Get-NetIPConfiguration |
 Where-Object {$_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback"} |
 Sort-Object InterfaceAlias -Unique |
 ForEach-Object {
-
     $ip = ($_.IPv4Address | Select-Object -First 1).IPAddress
     $mac = (Get-NetAdapter -Name $_.InterfaceAlias).MacAddress
-
     Add-Row "Network" $_.InterfaceAlias "IP: $ip | MAC: $mac"
 }
 
-# ================================
-# WIFI
-# ================================
+# ============================
+# WIFI (optional)
+# ============================
 try {
     $profiles = netsh wlan show profiles 2>$null |
         Select-String "\:(.*)$" |
-        ForEach-Object { $_.Matches.Groups[1].Value.Trim() } |
-        Sort-Object -Unique
+        ForEach-Object { $_.Matches.Groups[1].Value.Trim() }
 
     foreach ($p in $profiles) {
-        if ([string]::IsNullOrWhiteSpace($p)) { continue }
-
         $pass = netsh wlan show profile name="$p" key=clear 2>$null |
             Select-String "Key Content\W+\:(.*)$" |
             ForEach-Object { $_.Matches.Groups[1].Value.Trim() }
@@ -129,37 +114,24 @@ try {
             Add-Row "WiFi" $p $pass
         }
     }
-}
-catch {}
+} catch {}
 
-# ================================
-# APPS CHECK
-# ================================
-$Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
-                         HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
-                         -ErrorAction SilentlyContinue
-
-Add-Row "Apps" "VNC" ($(if ($Apps.DisplayName -match "VNC") {"Installed"} else {"Not Found"}))
-Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"Installed"} else {"Not Found"}))
-Add-Row "Apps" "Output Messenger" ($(if ($Apps.DisplayName -match "Output Messenger") {"Installed"} else {"Not Found"}))
-
-# ================================
+# ============================
 # EXPORT CSV
-# ================================
+# ============================
 try {
-    Write-Host "Exporting CSV..." -ForegroundColor Green
     $Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
     Copy-Item $LocalPath $FinalPath -Force
-    Write-Host "DONE ✔" -ForegroundColor Green
-}
-catch {
-    Write-Host "Export Failed!" -ForegroundColor Red
+    Write-Host "CSV Export Done ✔" -ForegroundColor Green
+} catch {
+    Write-Host "Export Failed" -ForegroundColor Red
 }
 
-# ================================
-# BITDEFENDER INSTALL (DIRECT FROM SHARE - NO COPY)
-# ================================
+# ============================
+# BITDEFENDER INSTALL (DIRECT FROM SHARE)
+# ============================
 try {
+
     Write-Host "Connecting to network share..." -ForegroundColor Cyan
 
     New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
@@ -169,26 +141,22 @@ try {
 
     if (Test-Path $installer) {
 
-        Write-Host "Starting Bitdefender installation from share..." -ForegroundColor Yellow
+        Write-Host "Starting Bitdefender installation..." -ForegroundColor Yellow
 
         Start-Process $installer `
             -ArgumentList "-runInstaller -installerXml $xmlfile -v" `
             -WindowStyle Hidden -Wait
 
-        Write-Host "Installation Done ✔" -ForegroundColor Green
-    }
-    else {
+        Write-Host "Installation Completed ✔" -ForegroundColor Green
+
+    } else {
         Write-Host "Installer not found on share" -ForegroundColor Red
     }
 
     Remove-PSDrive ProgShare -ErrorAction SilentlyContinue
-}
-catch {
-    Write-Host "Installation Failed!" -ForegroundColor Red
-    Write-Host $_
+
+} catch {
+    Write-Host "Installation Failed" -ForegroundColor Red
 }
 
-# ================================
-# END
-# ================================
-Read-Host "Press Enter to exit"
+Write-Host "DONE ✔" -ForegroundColor Cyan
