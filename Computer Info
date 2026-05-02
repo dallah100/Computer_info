@@ -21,7 +21,16 @@ try {
 $ErrorActionPreference = "Stop"
 
 $CompName = $env:COMPUTERNAME
-$UserName = $env:USERNAME
+
+# ✅ جلب اليوزر الفعلي
+try {
+    $UserName = (Get-CimInstance Win32_ComputerSystem).UserName
+    if (-not $UserName) {
+        $UserName = "No User Logged In"
+    }
+} catch {
+    $UserName = "Unknown"
+}
 
 $NetworkPath = "\\192.168.1.23\info pc"
 $LocalPath = "$env:TEMP\$CompName.csv"
