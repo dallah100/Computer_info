@@ -116,13 +116,6 @@ try {
 catch {}
 
 # ================================
-# PRINTERS
-# ================================
-Get-Printer | ForEach-Object {
-    Add-Row "Printers" $_.Name "Installed"
-}
-
-# ================================
 # APPS CHECK
 # ================================
 $Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
