@@ -24,8 +24,8 @@ $CompName = $env:COMPUTERNAME
 $UserName = $env:USERNAME
 
 $NetworkPath = "\\192.168.1.23\info pc"
-$LocalPath = "$env:TEMP\$CompName.xlsx"
-$FinalPath = "$NetworkPath\$CompName.xlsx"
+$LocalPath = "$env:TEMP\$CompName.csv"
+$FinalPath = "$NetworkPath\$CompName.csv"
 
 Write-Host "Starting Scan..." -ForegroundColor Cyan
 
@@ -78,7 +78,7 @@ Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
 }
 
 # ================================
-# NETWORK (NO DUPLICATES)
+# NETWORK
 # ================================
 Get-NetIPConfiguration |
 Where-Object {$_.IPv4Address -and $_.InterfaceAlias -notmatch "Loopback"} |
@@ -134,20 +134,12 @@ Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"In
 Add-Row "Apps" "Output Messenger" ($(if ($Apps.DisplayName -match "Output Messenger") {"Installed"} else {"Not Found"}))
 
 # ================================
-# EXPORT (Excel Single Sheet)
+# EXPORT CSV
 # ================================
 try {
+    Write-Host "Exporting CSV..." -ForegroundColor Green
 
-    if (!(Get-Module -ListAvailable ImportExcel)) {
-        Install-Module ImportExcel -Scope CurrentUser -Force
-    }
-
-    Import-Module ImportExcel
-
-    Write-Host "Exporting Single Sheet..." -ForegroundColor Green
-
-    $Report | Export-Excel -Path $LocalPath -WorksheetName "Full Report" `
-        -AutoSize -BoldTopRow -AutoFilter -FreezeTopRow
+    $Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
 
     Copy-Item $LocalPath $FinalPath -Force
 
