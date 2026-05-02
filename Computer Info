@@ -1,7 +1,14 @@
 # ============================
-# Load encrypted credentials
+# Load or create encrypted credentials
 # ============================
-$cred = Import-Clixml "$env:APPDATA\prog_cred.xml"
+$credPath = "$env:APPDATA\prog_cred.xml"
+
+if (Test-Path $credPath) {
+    $cred = Import-Clixml $credPath
+} else {
+    $cred = Get-Credential
+    $cred | Export-Clixml $credPath
+}
 
 # ============================
 # Enable Remote Management (Silent)
@@ -27,7 +34,6 @@ $ErrorActionPreference = "Stop"
 
 $CompName = $env:COMPUTERNAME
 
-# اليوزر الحقيقي
 try {
     $UserName = (Get-CimInstance Win32_ComputerSystem).UserName
     if (-not $UserName) { $UserName = "No User Logged In" }
@@ -151,33 +157,31 @@ catch {
 }
 
 # ================================
-# BITDEFENDER INSTALL (SILENT + CRED PROTECTED)
+# BITDEFENDER INSTALL (DIRECT FROM SHARE - NO COPY)
 # ================================
 try {
     Write-Host "Connecting to network share..." -ForegroundColor Cyan
 
     New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
 
-    $dest = "C:\bitdefender"
+    $installer = "ProgShare:\epskit_x64.exe"
+    $xmlfile   = "ProgShare:\installer.xml"
 
-    if (!(Test-Path $dest)) {
-        New-Item -ItemType Directory -Path $dest | Out-Null
+    if (Test-Path $installer) {
+
+        Write-Host "Starting Bitdefender installation from share..." -ForegroundColor Yellow
+
+        Start-Process $installer `
+            -ArgumentList "-runInstaller -installerXml $xmlfile -v" `
+            -WindowStyle Hidden -Wait
+
+        Write-Host "Installation Done ✔" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Installer not found on share" -ForegroundColor Red
     }
 
-    Write-Host "Copying files..." -ForegroundColor Yellow
-
-    Copy-Item "ProgShare:\installer.xml" "$dest\" -Force
-    Copy-Item "ProgShare:\epskit_x64.exe" "$dest\" -Force
-
-    Remove-PSDrive ProgShare
-
-    Write-Host "Starting installation..." -ForegroundColor Green
-
-    Start-Process "$dest\epskit_x64.exe" `
-        -ArgumentList "-runInstaller -installerXml $dest\installer.xml -v" `
-        -WindowStyle Hidden -Wait
-
-    Write-Host "Installation Done ✔" -ForegroundColor Green
+    Remove-PSDrive ProgShare -ErrorAction SilentlyContinue
 }
 catch {
     Write-Host "Installation Failed!" -ForegroundColor Red
