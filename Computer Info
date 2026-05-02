@@ -15,16 +15,6 @@ if (Test-Path $credPath) {
 }
 
 # ============================
-# Paths
-# ============================
-$CompName = $env:COMPUTERNAME
-$tempDir = "C:\Temp_BD"
-
-if (!(Test-Path $tempDir)) {
-    New-Item -ItemType Directory -Path $tempDir | Out-Null
-}
-
-# ============================
 # CONNECT SHARE
 # ============================
 Write-Host "Connecting to network share..." -ForegroundColor Cyan
@@ -32,12 +22,20 @@ Write-Host "Connecting to network share..." -ForegroundColor Cyan
 New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
 
 # ============================
-# LIVE PROGRESS COPY (REAL-TIME %)
+# LOCAL FOLDER
 # ============================
-Write-Host "Copying files with live progress..." -ForegroundColor Yellow
+$tempDir = "C:\Bitdefender"
+
+if (!(Test-Path $tempDir)) {
+    New-Item -ItemType Directory -Path $tempDir | Out-Null
+}
+
+# ============================
+# COPY WITH LIVE PROGRESS
+# ============================
+Write-Host "Copying files..." -ForegroundColor Yellow
 
 $files = @("epskit_x64.exe","installer.xml")
-
 $total = $files.Count
 $i = 0
 
@@ -45,42 +43,17 @@ foreach ($file in $files) {
 
     $i++
 
-    $source = "\\192.168.1.23\Prog\$file"
-    $dest   = "$tempDir\$file"
+    Copy-Item "ProgShare:\$file" "$tempDir\$file" -Force
 
-    if (Test-Path $source) {
+    $percent = [int](($i / $total) * 100)
 
-        # Get file size for real progress
-        $fileSize = (Get-Item $source).Length
-        $bufferSize = 1MB
-
-        $inStream = [System.IO.File]::OpenRead($source)
-        $outStream = [System.IO.File]::Create($dest)
-
-        $buffer = New-Object byte[] $bufferSize
-        $readTotal = 0
-
-        while (($read = $inStream.Read($buffer,0,$buffer.Length)) -gt 0) {
-
-            $outStream.Write($buffer,0,$read)
-            $readTotal += $read
-
-            $percentFile = [math]::Round(($readTotal / $fileSize) * 100)
-
-            $overall = [math]::Round((($i - 1) / $total * 100) + ($percentFile / $total))
-
-            Write-Progress `
-                -Activity "Copying Installation Files" `
-                -Status "$file ($percentFile%)" `
-                -PercentComplete $overall
-        }
-
-        $inStream.Close()
-        $outStream.Close()
-    }
+    Write-Progress `
+        -Activity "Preparing Bitdefender Package" `
+        -Status "Copying $file" `
+        -PercentComplete $percent
 }
 
-Write-Progress -Activity "Copying Installation Files" -Completed
+Write-Progress -Activity "Preparing Bitdefender Package" -Completed
 
 Remove-PSDrive ProgShare
 
@@ -89,35 +62,32 @@ Remove-PSDrive ProgShare
 # ============================
 Write-Host "Installing Bitdefender..." -ForegroundColor Yellow
 
-try {
+$exe = "$tempDir\epskit_x64.exe"
+$xml = "$tempDir\installer.xml"
 
-    $cmd = "`"$tempDir\epskit_x64.exe`" -runInstaller -installerXml `"$tempDir\installer.xml`" -v"
+$cmd = "`"$exe`" -runInstaller -installerXml `"$xml`" -v"
 
-    $process = Start-Process "cmd.exe" `
-        -ArgumentList "/c $cmd" `
-        -Verb RunAs `
-        -WindowStyle Hidden `
-        -PassThru `
-        -Wait
+$process = Start-Process "cmd.exe" `
+    -ArgumentList "/c $cmd" `
+    -Verb RunAs `
+    -WindowStyle Hidden `
+    -PassThru `
+    -Wait
 
-    if ($process.ExitCode -eq 0) {
-        Write-Host "Installation completed ✔" -ForegroundColor Green
-    } else {
-        Write-Host "Installation failed (Code: $($process.ExitCode))" -ForegroundColor Red
-    }
-
-} catch {
-    Write-Host "Installation error!" -ForegroundColor Red
-    Write-Host $_
+if ($process.ExitCode -eq 0) {
+    Write-Host "Installation completed ✔" -ForegroundColor Green
+} else {
+    Write-Host "Installation failed (Code: $($process.ExitCode))" -ForegroundColor Red
 }
 
 Start-Sleep -Seconds 10
 
 # ============================
-# SYSTEM INFO
+# SYSTEM INFO AFTER INSTALL
 # ============================
 Write-Host "Collecting system data..." -ForegroundColor Cyan
 
+$CompName = $env:COMPUTERNAME
 $OSInfo = Get-CimInstance Win32_OperatingSystem
 $CPU = (Get-CimInstance Win32_Processor).Name
 $BIOS = Get-CimInstance Win32_BIOS
