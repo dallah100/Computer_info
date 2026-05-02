@@ -1,15 +1,21 @@
 
-# ============================
-# ENABLE REMOTING
-# ============================
-Write-Host "Enabling PowerShell Remoting..." -ForegroundColor Cyan
+
+Write-Host "Configuring WinRM safely..." -ForegroundColor Cyan
 
 try {
-    Enable-PSRemoting -Force -ErrorAction Stop | Out-Null
+    # Force stop service first (avoid hanging)
+    Stop-Service WinRM -Force -ErrorAction SilentlyContinue
 
-    Set-Service WinRM -StartupType Automatic -ErrorAction SilentlyContinue
-    Start-Service WinRM -ErrorAction SilentlyContinue
+    # Set automatic start
+    Set-Service WinRM -StartupType Automatic
 
+    # Start again clean
+    Start-Service WinRM
+
+    # Ensure listener exists (safe alternative to Enable-PSRemoting)
+    winrm quickconfig -q | Out-Null
+
+    # Firewall rule (only if missing)
     if (-not (Get-NetFirewallRule -DisplayName "WinRM Manual" -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule `
             -DisplayName "WinRM Manual" `
@@ -23,8 +29,9 @@ try {
     Write-Host "WinRM Ready ✔" -ForegroundColor Green
 }
 catch {
-    Write-Host "Remoting failed (admin required likely) ❌" -ForegroundColor Red
+    Write-Host "WinRM setup failed ❌" -ForegroundColor Red
 }
+
 
 # ============================
 # CMD INSTALL BLOCK (YOUR SCRIPT)
