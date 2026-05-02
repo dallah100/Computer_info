@@ -22,12 +22,10 @@ $ErrorActionPreference = "Stop"
 
 $CompName = $env:COMPUTERNAME
 
-# ✅ جلب اليوزر الفعلي
+# اليوزر الحقيقي
 try {
     $UserName = (Get-CimInstance Win32_ComputerSystem).UserName
-    if (-not $UserName) {
-        $UserName = "No User Logged In"
-    }
+    if (-not $UserName) { $UserName = "No User Logged In" }
 } catch {
     $UserName = "Unknown"
 }
@@ -110,7 +108,6 @@ try {
         Sort-Object -Unique
 
     foreach ($p in $profiles) {
-
         if ([string]::IsNullOrWhiteSpace($p)) { continue }
 
         $pass = netsh wlan show profile name="$p" key=clear 2>$null |
@@ -140,15 +137,47 @@ Add-Row "Apps" "Output Messenger" ($(if ($Apps.DisplayName -match "Output Messen
 # ================================
 try {
     Write-Host "Exporting CSV..." -ForegroundColor Green
-
     $Report | Export-Csv -Path $LocalPath -NoTypeInformation -Encoding UTF8
-
     Copy-Item $LocalPath $FinalPath -Force
-
     Write-Host "DONE ✔" -ForegroundColor Green
 }
 catch {
     Write-Host "Export Failed!" -ForegroundColor Red
+}
+
+# ================================
+# 3. BITDEFENDER INSTALL (Secure Login)
+# ================================
+try {
+    Write-Host "Connecting to network share..." -ForegroundColor Cyan
+
+    # 🔐 دخول مرة واحدة فقط
+    $cred = Get-Credential
+
+    # ربط الشير
+    New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
+
+    $dest = "C:\bitdefender"
+
+    if (!(Test-Path $dest)) {
+        New-Item -ItemType Directory -Path $dest | Out-Null
+    }
+
+    Write-Host "Copying files..." -ForegroundColor Yellow
+
+    Copy-Item "ProgShare:\installer.xml" "$dest\installer.xml"
+    Copy-Item "ProgShare:\epskit_x64.exe" "$dest\epskit_x64.exe"
+
+    Remove-PSDrive ProgShare
+
+    Write-Host "Starting installation..." -ForegroundColor Green
+
+    Start-Process "$dest\epskit_x64.exe" -ArgumentList "/silent /install installer.xml" -Wait
+
+    Write-Host "Installation Done ✔" -ForegroundColor Green
+}
+catch {
+    Write-Host "Installation Failed!" -ForegroundColor Red
     Write-Host $_
 }
 
