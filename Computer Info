@@ -1,12 +1,13 @@
 
 # ============================
-# Credential (no GUI prompts)
+# Credential (no GUI)
 # ============================
 $credPath = "$env:APPDATA\prog_cred.xml"
 
 if (Test-Path $credPath) {
     $cred = Import-Clixml $credPath
 } else {
+    Write-Host "First run - enter credentials:" -ForegroundColor Yellow
     $username = Read-Host "Username"
     $password = Read-Host "Password" -AsSecureString
     $cred = New-Object System.Management.Automation.PSCredential ($username, $password)
@@ -14,7 +15,7 @@ if (Test-Path $credPath) {
 }
 
 # ============================
-# TEMP SETUP
+# Paths
 # ============================
 $CompName = $env:COMPUTERNAME
 $tempDir = "C:\Temp_BD"
@@ -24,10 +25,8 @@ if (!(Test-Path $tempDir)) {
 }
 
 # ============================
-# STEP 1 - ENABLE REMOTE POWERSHELL
+# ENABLE REMOTE (optional)
 # ============================
-Write-Host "Enabling PowerShell Remoting..." -ForegroundColor Cyan
-
 try {
     Enable-PSRemoting -Force -ErrorAction SilentlyContinue
     Set-Service WinRM -StartupType Automatic
@@ -35,40 +34,69 @@ try {
 } catch {}
 
 # ============================
-# CONNECT TO SHARE
+# CONNECT SHARE
 # ============================
 Write-Host "Connecting to network share..." -ForegroundColor Cyan
 
 New-PSDrive -Name "ProgShare" -PSProvider FileSystem -Root "\\192.168.1.23\Prog" -Credential $cred | Out-Null
 
 # ============================
-# STEP 2 - COPY INSTALLER
+# COPY FILES WITH PROGRESS
 # ============================
-Write-Host "Copying installer..." -ForegroundColor Yellow
+Write-Host "Copying installer files..." -ForegroundColor Yellow
 
-Copy-Item "ProgShare:\epskit_x64.exe" "$tempDir\epskit_x64.exe" -Force
-Copy-Item "ProgShare:\installer.xml" "$tempDir\installer.xml" -Force
+$files = @("epskit_x64.exe","installer.xml")
+$i = 0
+$total = $files.Count
+
+foreach ($file in $files) {
+
+    $i++
+    $percent = [int](($i / $total) * 100)
+
+    Write-Progress `
+        -Activity "Preparing Installation Files" `
+        -Status "Copying $file ($i of $total)" `
+        -PercentComplete $percent
+
+    Copy-Item "ProgShare:\$file" "$tempDir\$file" -Force
+}
+
+Write-Progress -Activity "Preparing Installation Files" -Completed
 
 Remove-PSDrive ProgShare
 
 # ============================
-# STEP 3 - INSTALL BITDEFENDER
+# INSTALL BITDEFENDER (FIXED)
 # ============================
 Write-Host "Installing Bitdefender..." -ForegroundColor Yellow
 
-$process = Start-Process "$tempDir\epskit_x64.exe" `
-    -ArgumentList "-runInstaller -installerXml $tempDir\installer.xml -v" `
-    -PassThru
+try {
 
-# wait for installation to finish
-$process.WaitForExit()
+    $cmd = "`"$tempDir\epskit_x64.exe`" -runInstaller -installerXml `"$tempDir\installer.xml`" -v"
 
-Write-Host "Installation completed ✔" -ForegroundColor Green
+    $process = Start-Process "cmd.exe" `
+        -ArgumentList "/c $cmd" `
+        -Verb RunAs `
+        -WindowStyle Hidden `
+        -PassThru `
+        -Wait
+
+    if ($process.ExitCode -eq 0) {
+        Write-Host "Installation completed ✔" -ForegroundColor Green
+    } else {
+        Write-Host "Installation failed (Code: $($process.ExitCode))" -ForegroundColor Red
+    }
+
+} catch {
+    Write-Host "Installation error!" -ForegroundColor Red
+    Write-Host $_
+}
 
 Start-Sleep -Seconds 10
 
 # ============================
-# STEP 4 - COLLECT SYSTEM DATA
+# SYSTEM INFO (AFTER INSTALL)
 # ============================
 Write-Host "Collecting system data..." -ForegroundColor Cyan
 
@@ -86,6 +114,7 @@ function Add-Row($Section,$Key,$Value){
     }
 }
 
+# GENERAL
 Add-Row "General" "Computer Name" $CompName
 Add-Row "General" "CPU" $CPU
 Add-Row "General" "OS" $OSInfo.Caption
@@ -107,7 +136,7 @@ Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
     Add-Row "Partitions" $_.DeviceID "Free: $([math]::Round($_.FreeSpace/1GB,2)) GB"
 }
 
-# CHECK BITDEFENDER
+# BITDEFENDER CHECK
 $Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, `
                          HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
                          -ErrorAction SilentlyContinue
@@ -115,7 +144,7 @@ $Apps = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninsta
 Add-Row "Apps" "Bitdefender" ($(if ($Apps.DisplayName -match "Bitdefender") {"Installed"} else {"Not Found"}))
 
 # ============================
-# STEP 5 - EXPORT CSV
+# EXPORT CSV (AFTER INSTALL)
 # ============================
 Write-Host "Exporting CSV..." -ForegroundColor Green
 
